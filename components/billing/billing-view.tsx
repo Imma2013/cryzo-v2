@@ -5,11 +5,15 @@ import { CreditCard } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Pricing } from "@/components/ui/pricing-table";
-import { formatTokenCount, PLAN_CONFIG, type PlanId } from "@/lib/pricing";
+import {
+  formatTokenCount,
+  PLAN_CONFIG,
+  tokensToCredits,
+  type PlanId,
+} from "@/lib/pricing";
 import type { useBillingSummary } from "@/hooks/use-billing-summary";
 
 const billingLinks = {
-  enterprise: process.env.NEXT_PUBLIC_STRIPE_CONTACT_SALES_URL || "#",
   student: process.env.NEXT_PUBLIC_STRIPE_STUDENT_DISCOUNT_URL || "#",
 };
 
@@ -31,6 +35,11 @@ export function BillingView({
   const activePlan =
     billingSummary ? PLAN_CONFIG[billingSummary.plan] : PLAN_CONFIG.free;
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
+  const remainingCredits = tokensToCredits(billingSummary?.remainingTokens ?? 0);
+  const usedCredits = tokensToCredits(billingSummary?.totalTokensUsed ?? 0);
+  const monthlyCredits = billingSummary
+    ? PLAN_CONFIG[billingSummary.plan].monthlyCredits
+    : PLAN_CONFIG.free.monthlyCredits;
 
   async function startCheckout(plan: PlanId) {
     if (!userId || (plan !== "pro" && plan !== "business")) {
@@ -78,10 +87,10 @@ export function BillingView({
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="rounded-xl border border-border bg-background p-4">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Remaining tokens
+                  Remaining credits
                 </p>
                 <p className="mt-2 text-2xl font-semibold text-foreground">
-                  {formatTokenCount(billingSummary?.remainingTokens ?? 0)}
+                  {remainingCredits.toLocaleString()}
                 </p>
                 {isLiveEstimating ? (
                   <p className="mt-1 text-xs text-amber-600">
@@ -91,14 +100,14 @@ export function BillingView({
               </div>
               <div className="rounded-xl border border-border bg-background p-4">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Tokens used
+                  Credits used
                 </p>
                 <p className="mt-2 text-2xl font-semibold text-foreground">
-                  {formatTokenCount(billingSummary?.totalTokensUsed ?? 0)}
+                  {usedCredits.toLocaleString()}
                 </p>
                 {isLiveEstimating ? (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    +{formatTokenCount(provisionalUsedTokens ?? 0)} in-flight
+                    +{tokensToCredits(provisionalUsedTokens ?? 0).toLocaleString()} in-flight
                   </p>
                 ) : null}
               </div>
@@ -107,9 +116,12 @@ export function BillingView({
                   Monthly allowance
                 </p>
                 <p className="mt-2 text-2xl font-semibold text-foreground">
+                  {monthlyCredits.toLocaleString()}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
                   {formatTokenCount(
                     billingSummary?.monthlyTokens ?? PLAN_CONFIG.free.monthlyTokens,
-                  )}
+                  )} tokens under the hood
                 </p>
               </div>
             </div>
@@ -124,19 +136,19 @@ export function BillingView({
           </div>
         }
         title="Billing"
-        subtitle="Plans are sold in monthly tokens. We meter actual model token usage server-side and subtract it directly from your monthly allowance."
+        subtitle="Plans are sold in monthly credits. We meter actual model token usage server-side and convert it into credits behind the scenes."
         tiers={[
           {
             name: PLAN_CONFIG.free.name,
             description:
-              "Great for trying the product. Tokens reset every month and usage is tracked behind the scenes.",
+              "Great for trying the product. Credits reset every month and usage is tracked behind the scenes.",
             price: PLAN_CONFIG.free.monthlyPrice,
             billingPeriod: "per month",
             buttonText: billingSummary?.plan === "free" ? "Current plan" : "Included",
             buttonDisabled: true,
             features: [
               {
-                text: `${formatTokenCount(PLAN_CONFIG.free.monthlyTokens)} monthly tokens`,
+                text: `${PLAN_CONFIG.free.monthlyCredits.toLocaleString()} monthly credits`,
               },
               { text: "Recurring free monthly allowance" },
               { text: "Basic chat and app connections" },
@@ -157,10 +169,10 @@ export function BillingView({
             featuresTitle: "Everything in Free, plus:",
             features: [
               {
-                text: `${formatTokenCount(PLAN_CONFIG.pro.monthlyTokens)} monthly tokens`,
+                text: `${PLAN_CONFIG.pro.monthlyCredits.toLocaleString()} monthly credits`,
                 hasInfo: true,
               },
-              { text: "Priority monthly token budget" },
+              { text: "Priority monthly budget" },
               { text: "Higher message volume for daily use" },
               { text: "Better fit for multi-app workflows" },
             ],
@@ -181,32 +193,17 @@ export function BillingView({
             featuresTitle: "Everything in Pro, plus:",
             features: [
               {
-                text: `${formatTokenCount(PLAN_CONFIG.business.monthlyTokens)} monthly tokens`,
+                text: `${PLAN_CONFIG.business.monthlyCredits.toLocaleString()} monthly credits`,
                 hasInfo: true,
               },
-              { text: "Larger team token budget" },
+              { text: "Larger team budget" },
               { text: "Better headroom for production usage" },
               { text: "Planned admin and usage controls" },
             ],
           },
-          {
-            name: PLAN_CONFIG.enterprise.name,
-            description:
-              "For companies that need procurement, support, custom limits, and governance.",
-            priceLabel: "Custom billing",
-            buttonText: "Book a demo",
-            buttonHref: billingLinks.enterprise,
-            featuresTitle: "Everything in Business, plus:",
-            features: [
-              { text: "Custom monthly token budget" },
-              { text: "Priority support" },
-              { text: "Custom billing and onboarding" },
-              { text: "Advanced security and governance" },
-            ],
-          },
         ]}
         footerTitle="How usage is billed"
-        footerDescription="We expose tokens directly in the UI and meter real model token usage server-side against your monthly plan allowance."
+        footerDescription="We expose credits in the UI and meter real model token usage server-side against your monthly plan allowance."
         footerButtonText="Learn more"
         footerButtonHref={billingLinks.student}
         className="py-10"

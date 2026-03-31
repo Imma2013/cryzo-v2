@@ -1,11 +1,13 @@
 export type PlanId = "free" | "pro" | "business" | "enterprise";
 
 export const LEGACY_TOKENS_PER_CREDIT = 7_500;
+export const TOKENS_PER_CREDIT = 75;
 
 export const PLAN_CONFIG: Record<PlanId, {
   id: PlanId;
   name: string;
   monthlyPrice: number | null;
+  monthlyCredits: number;
   monthlyTokens: number;
   description: string;
   headline: string;
@@ -14,33 +16,37 @@ export const PLAN_CONFIG: Record<PlanId, {
     id: "free",
     name: "Free",
     monthlyPrice: 0,
+    monthlyCredits: 5_000,
     monthlyTokens: 375_000,
     description: "Good for trying the product and handling lightweight monthly usage.",
-    headline: "375K monthly tokens included",
+    headline: "5K monthly credits included",
   },
   pro: {
     id: "pro",
     name: "Pro",
-    monthlyPrice: 29,
-    monthlyTokens: 3_750_000,
+    monthlyPrice: 20,
+    monthlyCredits: 20_000,
+    monthlyTokens: 1_500_000,
     description: "For solo operators and small teams that need reliable monthly capacity.",
-    headline: "3.75M monthly tokens included",
+    headline: "20K monthly credits included",
   },
   business: {
     id: "business",
     name: "Business",
-    monthlyPrice: 99,
-    monthlyTokens: 18_750_000,
+    monthlyPrice: 80,
+    monthlyCredits: 100_000,
+    monthlyTokens: 7_500_000,
     description: "For teams shipping client work, automations, and higher message volume.",
-    headline: "18.75M monthly tokens included",
+    headline: "100K monthly credits included",
   },
   enterprise: {
     id: "enterprise",
     name: "Enterprise",
     monthlyPrice: null,
+    monthlyCredits: 500_000,
     monthlyTokens: 75_000_000,
     description: "For organizations that need custom limits, support, procurement, and governance.",
-    headline: "Custom monthly token budget",
+    headline: "Custom monthly credit budget",
   },
 };
 
@@ -62,6 +68,18 @@ export function formatTokenCount(tokens: number) {
 
 export function getMonthlyTokensForPlan(plan: PlanId) {
   return PLAN_CONFIG[plan].monthlyTokens;
+}
+
+export function getMonthlyCreditsForPlan(plan: PlanId) {
+  return PLAN_CONFIG[plan].monthlyCredits;
+}
+
+export function tokensToCredits(tokens: number) {
+  return Math.max(0, Math.ceil(tokens / TOKENS_PER_CREDIT));
+}
+
+export function creditsToTokens(credits: number) {
+  return credits * TOKENS_PER_CREDIT;
 }
 
 export function getCurrentBillingWindow(now = new Date()) {

@@ -1,5 +1,13 @@
 "use client";
 import { useState } from "react";
+
+function getDisplayName(toolName: string) {
+  if (toolName.startsWith("COMPOSIO_")) {
+    return "Cryzo Thinking";
+  }
+  return toolName.replaceAll("_", " ");
+}
+
 export function ToolCallDisplay({
   toolName,
   input,
@@ -12,6 +20,7 @@ export function ToolCallDisplay({
   isLoading: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const displayName = getDisplayName(toolName);
   return (
     <div className="my-1">
       <button
@@ -27,7 +36,7 @@ export function ToolCallDisplay({
         ) : (
           <span className="text-green-600 dark:text-green-400"></span>
         )}
-        <code className="font-mono">{toolName}</code>
+        <span className="font-medium">{displayName}</span>
         {!isLoading && <span className="text-gray-400">{expanded ? "" : ""}</span>}
       </button>
       {expanded && !isLoading && (

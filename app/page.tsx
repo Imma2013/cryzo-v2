@@ -13,7 +13,7 @@ import { useBillingSummary } from "../hooks/use-billing-summary";
 import { useChatHistory } from "../hooks/use-chat-history";
 import { useLocalStorage } from "../hooks/use-local-storage";
 import { auth, googleProvider } from "../lib/firebase";
-import { formatTokenCount } from "../lib/pricing";
+import { formatTokenCount, tokensToCredits } from "../lib/pricing";
 
 function estimateTextTokens(text: string) {
   return Math.max(0, Math.ceil(text.trim().length / 4));
@@ -330,10 +330,10 @@ export default function ChatPage() {
           <div className="flex items-center gap-3">
             <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-right">
               <p className="text-[10px] uppercase tracking-wide text-neutral-500">
-                Remaining tokens
+                Remaining credits
               </p>
               <p className="text-sm font-medium text-black">
-                {formatTokenCount(billingSummary?.remainingTokens ?? 0)}
+                {tokensToCredits(billingSummary?.remainingTokens ?? 0).toLocaleString()}
                 {isLiveEstimating ? (
                   <span className="ml-1 text-[10px] text-neutral-400">live</span>
                 ) : null}
