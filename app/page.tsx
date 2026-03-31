@@ -361,9 +361,7 @@ export default function ChatPage() {
             >
               <div className="mx-auto max-w-3xl">
                 {messages.length === 0 ? (
-                  <div className="px-6 py-16 text-center text-neutral-400">
-                    Try: &quot;Star the composio repo on GitHub&quot;
-                  </div>
+                  <div className="px-6 py-16" />
                 ) : (
                   messages.map((message) => (
                     <div
