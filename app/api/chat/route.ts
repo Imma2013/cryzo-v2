@@ -79,31 +79,42 @@ export async function POST(req: Request) {
     messages: await convertToModelMessages(messages),
     tools,
     stopWhen: stepCountIs(10),
-    onFinish: async ({ usage }) => {
-      if (!convex || !userId || !usage) {
-        return;
-      }
-
-      const inputTokens = usage.inputTokens ?? 0;
-      const outputTokens = usage.outputTokens ?? 0;
-      const totalTokens =
-        usage.totalTokens ?? inputTokens + outputTokens;
-
-      if (totalTokens <= 0) {
-        return;
-      }
-
-      await convex.mutation(convexApi.billing.recordUsage, {
-        userId,
-        model: "gpt-5.4",
-        inputTokens,
-        outputTokens,
-        totalTokens,
-      });
-    },
   });
   return result.toUIMessageStreamResponse({
     originalMessages: messages,
     generateMessageId: () => generateId(),
+    onFinish: async () => {
+      if (!convex || !userId) {
+        return;
+      }
+
+      try {
+        const usage = await result.totalUsage;
+        const inputTokens = usage.inputTokens ?? 0;
+        const outputTokens = usage.outputTokens ?? 0;
+        const totalTokens = usage.totalTokens ?? inputTokens + outputTokens;
+
+        if (totalTokens <= 0) {
+          console.warn("No final usage recorded for completed chat stream.", {
+            userId,
+            usage,
+          });
+          return;
+        }
+
+        await convex.mutation(convexApi.billing.recordUsage, {
+          userId,
+          model: "gpt-5.4",
+          inputTokens,
+          outputTokens,
+          totalTokens,
+        });
+      } catch (error) {
+        console.error("Failed to persist final billing usage.", {
+          userId,
+          error,
+        });
+      }
+    },
   });
 }
