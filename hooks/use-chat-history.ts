@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useMemo } from "react";
 import { useConvex, useMutation, useQuery } from "convex/react";
 import type { UIMessage } from "ai";
 import type { Id } from "../convex/_generated/dataModel";
@@ -16,62 +17,81 @@ export type ChatSummary = {
 
 export function useChatHistory(userId: string | null) {
   const convex = useConvex();
-  const chats = useQuery(
-    api.chats.listChats,
-    userId ? { userId } : "skip",
-  );
+  const chats = useQuery(api.chats.listChats, userId ? { userId } : "skip");
   const createChatMutation = useMutation(api.chats.createChat);
   const deleteChatMutation = useMutation(api.chats.deleteChat);
   const saveMessagesMutation = useMutation(api.chats.saveMessages);
 
   const isLoadingChats = userId ? chats === undefined : false;
 
-  async function createChat(model?: string) {
-    if (!userId) {
-      return null;
-    }
-    const chat = await createChatMutation({ userId, model });
-    return chat as ChatSummary;
-  }
+  const createChat = useCallback(
+    async (model?: string) => {
+      if (!userId) {
+        return null;
+      }
+      const chat = await createChatMutation({ userId, model });
+      return chat as ChatSummary;
+    },
+    [createChatMutation, userId],
+  );
 
-  async function selectChat(chatId: string): Promise<UIMessage[]> {
-    if (!userId) {
-      return [];
-    }
-    const chat = await convex.query(api.chats.getChat, {
-      chatId: chatId as Id<"chats">,
-      userId,
-    });
-    return (chat?.messages ?? []) as UIMessage[];
-  }
+  const selectChat = useCallback(
+    async (chatId: string): Promise<UIMessage[]> => {
+      if (!userId) {
+        return [];
+      }
+      const chat = await convex.query(api.chats.getChat, {
+        chatId: chatId as Id<"chats">,
+        userId,
+      });
+      return (chat?.messages ?? []) as UIMessage[];
+    },
+    [convex, userId],
+  );
 
-  async function deleteChat(chatId: string) {
-    if (!userId) {
-      return;
-    }
-    await deleteChatMutation({
-      chatId: chatId as Id<"chats">,
-      userId,
-    });
-  }
+  const deleteChat = useCallback(
+    async (chatId: string) => {
+      if (!userId) {
+        return;
+      }
+      await deleteChatMutation({
+        chatId: chatId as Id<"chats">,
+        userId,
+      });
+    },
+    [deleteChatMutation, userId],
+  );
 
-  async function saveMessages(chatId: string, messages: UIMessage[]) {
-    if (!userId || messages.length === 0) {
-      return;
-    }
-    await saveMessagesMutation({
-      chatId: chatId as Id<"chats">,
-      userId,
-      messages,
-    });
-  }
+  const saveMessages = useCallback(
+    async (chatId: string, messages: UIMessage[]) => {
+      if (!userId || messages.length === 0) {
+        return;
+      }
+      await saveMessagesMutation({
+        chatId: chatId as Id<"chats">,
+        userId,
+        messages,
+      });
+    },
+    [saveMessagesMutation, userId],
+  );
 
-  return {
-    chats: chats ?? [],
-    isLoadingChats,
-    createChat,
-    selectChat,
-    deleteChat,
-    saveMessages,
-  };
+  return useMemo(
+    () => ({
+      chats: chats ?? [],
+      isLoadingChats,
+      createChat,
+      selectChat,
+      deleteChat,
+      saveMessages,
+    }),
+    [
+      chats,
+      createChat,
+      deleteChat,
+      isLoadingChats,
+      saveMessages,
+      selectChat,
+    ],
+  );
 }
