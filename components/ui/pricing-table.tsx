@@ -23,7 +23,7 @@ export interface PricingFeature {
 export interface PricingTier {
   name: string;
   description: string;
-  price?: number;
+  price?: number | null;
   priceLabel?: string;
   billingPeriod?: string;
   buttonText: string;
@@ -35,6 +35,8 @@ export interface PricingTier {
   defaultCredits?: string;
   featuresTitle?: string;
   buttonHref?: string;
+  onButtonClick?: () => void;
+  buttonDisabled?: boolean;
 }
 
 export interface PricingProps {
@@ -152,6 +154,20 @@ export function Pricing({
                     {tier.buttonText}
                   </a>
                 </Button>
+              ) : tier.onButtonClick ? (
+                <Button
+                  className={cn(
+                    "mb-6 w-full",
+                    tier.isPrimary
+                      ? "bg-purple-600 text-white hover:bg-purple-700"
+                      : "border border-border bg-secondary text-secondary-foreground hover:bg-secondary/80",
+                  )}
+                  variant={tier.buttonVariant || "default"}
+                  onClick={tier.onButtonClick}
+                  disabled={tier.buttonDisabled}
+                >
+                  {tier.buttonText}
+                </Button>
               ) : (
                 <Button
                   className={cn(
@@ -161,6 +177,7 @@ export function Pricing({
                       : "border border-border bg-secondary text-secondary-foreground hover:bg-secondary/80",
                   )}
                   variant={tier.buttonVariant || "default"}
+                  disabled={tier.buttonDisabled}
                 >
                   {tier.buttonText}
                 </Button>

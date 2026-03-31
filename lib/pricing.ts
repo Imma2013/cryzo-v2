@@ -1,67 +1,52 @@
 export type PlanId = "free" | "pro" | "business" | "enterprise";
 
-export const TOKENS_PER_CREDIT = 7_500;
-export const MINIMUM_CREDITS_PER_REQUEST = 1;
-
-export const PLAN_CONFIG: Record<
-  Exclude<PlanId, "enterprise">,
-  {
-    id: Exclude<PlanId, "enterprise">;
-    name: string;
-    monthlyPrice: number;
-    monthlyCredits: number;
-    description: string;
-    headline: string;
-  }
-> & {
-  enterprise: {
-    id: "enterprise";
-    name: string;
-    monthlyPrice: null;
-    monthlyCredits: number;
-    description: string;
-    headline: string;
-  };
-} = {
+export const PLAN_CONFIG: Record<PlanId, {
+  id: PlanId;
+  name: string;
+  monthlyPrice: number | null;
+  monthlyTokens: number;
+  description: string;
+  headline: string;
+}> = {
   free: {
     id: "free",
     name: "Free",
     monthlyPrice: 0,
-    monthlyCredits: 50,
+    monthlyTokens: 375_000,
     description: "Good for trying the product and handling lightweight monthly usage.",
-    headline: "50 monthly credits included",
+    headline: "375K monthly tokens included",
   },
   pro: {
     id: "pro",
     name: "Pro",
     monthlyPrice: 29,
-    monthlyCredits: 500,
+    monthlyTokens: 3_750_000,
     description: "For solo operators and small teams that need reliable monthly capacity.",
-    headline: "500 monthly credits included",
+    headline: "3.75M monthly tokens included",
   },
   business: {
     id: "business",
     name: "Business",
     monthlyPrice: 99,
-    monthlyCredits: 2500,
+    monthlyTokens: 18_750_000,
     description: "For teams shipping client work, automations, and higher message volume.",
-    headline: "2,500 monthly credits included",
+    headline: "18.75M monthly tokens included",
   },
   enterprise: {
     id: "enterprise",
     name: "Enterprise",
     monthlyPrice: null,
-    monthlyCredits: 10000,
+    monthlyTokens: 75_000_000,
     description: "For organizations that need custom limits, support, procurement, and governance.",
-    headline: "Custom billing and custom limits",
+    headline: "Custom monthly token budget",
   },
 };
 
-export function creditsToApproxTokens(credits: number) {
-  return credits * TOKENS_PER_CREDIT;
-}
-
 export function formatTokenCount(tokens: number) {
+  if (tokens >= 1_000_000_000) {
+    return `${(tokens / 1_000_000_000).toFixed(tokens % 1_000_000_000 === 0 ? 0 : 1)}B`;
+  }
+
   if (tokens >= 1_000_000) {
     return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
   }
@@ -73,25 +58,8 @@ export function formatTokenCount(tokens: number) {
   return `${tokens}`;
 }
 
-export function tokensToCredits(totalTokens: number, model?: string | null) {
-  const multiplier = getModelCreditMultiplier(model);
-  return Math.max(
-    MINIMUM_CREDITS_PER_REQUEST,
-    Math.ceil((totalTokens * multiplier) / TOKENS_PER_CREDIT),
-  );
-}
-
-export function getMonthlyCreditsForPlan(plan: PlanId) {
-  return PLAN_CONFIG[plan].monthlyCredits;
-}
-
-export function getModelCreditMultiplier(model?: string | null) {
-  switch (model) {
-    case "gpt-5.4":
-      return 1;
-    default:
-      return 1;
-  }
+export function getMonthlyTokensForPlan(plan: PlanId) {
+  return PLAN_CONFIG[plan].monthlyTokens;
 }
 
 export function getCurrentBillingWindow(now = new Date()) {
@@ -102,4 +70,20 @@ export function getCurrentBillingWindow(now = new Date()) {
     cycleStart: start.toISOString(),
     cycleEnd: end.toISOString(),
   };
+}
+
+export function getPlanFromPriceId(priceId?: string | null): PlanId | null {
+  if (!priceId) {
+    return null;
+  }
+
+  if (priceId === process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY) {
+    return "pro";
+  }
+
+  if (priceId === process.env.NEXT_PUBLIC_STRIPE_PRICE_BUSINESS_MONTHLY) {
+    return "business";
+  }
+
+  return null;
 }

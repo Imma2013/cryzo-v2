@@ -25,6 +25,7 @@
     "react": "latest",
     "react-dom": "latest",
     "react-firebase-hooks": "^5.1.1",
+    "stripe": "^21.0.1",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "latest"
   },

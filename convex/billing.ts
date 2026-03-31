@@ -1,6 +1,21 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { getCurrentBillingWindow, getMonthlyCreditsForPlan, type PlanId } from "../lib/pricing";
+import { getCurrentBillingWindow, getMonthlyTokensForPlan, type PlanId } from "../lib/pricing";
+
+function getStoredMonthlyTokens(profile: {
+  monthlyTokens?: number;
+  monthlyCredits?: number;
+  plan: PlanId | string;
+}) {
+  return profile.monthlyTokens ?? profile.monthlyCredits ?? getMonthlyTokensForPlan(profile.plan as PlanId);
+}
+
+function getStoredUsedTokens(profile: {
+  usedTokens?: number;
+  usedCredits?: number;
+}) {
+  return profile.usedTokens ?? profile.usedCredits ?? 0;
+}
 
 async function getOrCreateBillingProfile(
   ctx: any,
@@ -18,8 +33,8 @@ async function getOrCreateBillingProfile(
       userId,
       plan: "free" as PlanId,
       subscriptionStatus: "free",
-      monthlyCredits: getMonthlyCreditsForPlan("free"),
-      usedCredits: 0,
+      monthlyTokens: getMonthlyTokensForPlan("free"),
+      usedTokens: 0,
       totalTokensUsed: 0,
       cycleStart: currentWindow.cycleStart,
       cycleEnd: currentWindow.cycleEnd,
@@ -34,10 +49,10 @@ async function getOrCreateBillingProfile(
 
   if (new Date(existing.cycleEnd).getTime() <= Date.now()) {
     const refreshedWindow = getCurrentBillingWindow();
-    const monthlyCredits = getMonthlyCreditsForPlan(existing.plan as PlanId);
+    const monthlyTokens = getMonthlyTokensForPlan(existing.plan as PlanId);
     await ctx.db.patch(existing._id, {
-      monthlyCredits,
-      usedCredits: 0,
+      monthlyTokens,
+      usedTokens: 0,
       totalTokensUsed: 0,
       cycleStart: refreshedWindow.cycleStart,
       cycleEnd: refreshedWindow.cycleEnd,
@@ -46,8 +61,10 @@ async function getOrCreateBillingProfile(
 
     return {
       ...existing,
-      monthlyCredits,
-      usedCredits: 0,
+      monthlyTokens,
+      usedTokens: 0,
+      monthlyCredits: undefined,
+      usedCredits: undefined,
       totalTokensUsed: 0,
       cycleStart: refreshedWindow.cycleStart,
       cycleEnd: refreshedWindow.cycleEnd,
@@ -65,6 +82,8 @@ export const ensureBillingProfile = mutation({
     return {
       plan: profile.plan,
       subscriptionStatus: profile.subscriptionStatus,
+      stripeCustomerId: profile.stripeCustomerId ?? null,
+      stripeSubscriptionId: profile.stripeSubscriptionId ?? null,
     };
   },
 });
@@ -78,33 +97,39 @@ export const getBillingSummary = query({
       .unique();
 
     if (!profile) {
-      const credits = getMonthlyCreditsForPlan("free");
+      const tokens = getMonthlyTokensForPlan("free");
       const currentWindow = getCurrentBillingWindow();
       return {
         plan: "free" as PlanId,
         subscriptionStatus: "free",
         isTrial: false,
-        monthlyCredits: credits,
-        usedCredits: 0,
-        remainingCredits: credits,
+        monthlyTokens: tokens,
+        usedTokens: 0,
+        remainingTokens: tokens,
         totalTokensUsed: 0,
         cycleStart: currentWindow.cycleStart,
         cycleEnd: currentWindow.cycleEnd,
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
       };
     }
 
-    const remainingCredits = Math.max(profile.monthlyCredits - profile.usedCredits, 0);
+    const monthlyTokens = getStoredMonthlyTokens(profile);
+    const usedTokens = getStoredUsedTokens(profile);
+    const remainingTokens = Math.max(monthlyTokens - usedTokens, 0);
 
     return {
       plan: profile.plan as PlanId,
       subscriptionStatus: profile.subscriptionStatus,
       isTrial: profile.isTrial,
-      monthlyCredits: profile.monthlyCredits,
-      usedCredits: profile.usedCredits,
-      remainingCredits,
+      monthlyTokens,
+      usedTokens,
+      remainingTokens,
       totalTokensUsed: profile.totalTokensUsed,
       cycleStart: profile.cycleStart,
       cycleEnd: profile.cycleEnd,
+      stripeCustomerId: profile.stripeCustomerId ?? null,
+      stripeSubscriptionId: profile.stripeSubscriptionId ?? null,
     };
   },
 });
@@ -116,11 +141,12 @@ export const recordUsage = mutation({
     inputTokens: v.number(),
     outputTokens: v.number(),
     totalTokens: v.number(),
-    creditsCharged: v.number(),
   },
   handler: async (ctx, args) => {
     const profile = await getOrCreateBillingProfile(ctx, args.userId);
     const now = new Date().toISOString();
+    const usedTokens = getStoredUsedTokens(profile);
+    const totalTokensUsed = profile.totalTokensUsed ?? 0;
 
     await ctx.db.insert("usageEvents", {
       userId: args.userId,
@@ -129,13 +155,14 @@ export const recordUsage = mutation({
       inputTokens: args.inputTokens,
       outputTokens: args.outputTokens,
       totalTokens: args.totalTokens,
-      creditsCharged: args.creditsCharged,
       createdAt: now,
     });
 
     await ctx.db.patch(profile._id, {
-      usedCredits: profile.usedCredits + args.creditsCharged,
-      totalTokensUsed: profile.totalTokensUsed + args.totalTokens,
+      usedTokens: usedTokens + args.totalTokens,
+      monthlyCredits: undefined,
+      usedCredits: undefined,
+      totalTokensUsed: totalTokensUsed + args.totalTokens,
       updatedAt: now,
     });
 
@@ -160,14 +187,16 @@ export const upsertSubscription = mutation({
   handler: async (ctx, args) => {
     const profile = await getOrCreateBillingProfile(ctx, args.userId);
     const now = new Date().toISOString();
-    const monthlyCredits = getMonthlyCreditsForPlan(args.plan);
+    const monthlyTokens = getMonthlyTokensForPlan(args.plan);
 
     await ctx.db.patch(profile._id, {
       plan: args.plan,
       subscriptionStatus: args.subscriptionStatus,
       stripeCustomerId: args.stripeCustomerId,
       stripeSubscriptionId: args.stripeSubscriptionId,
-      monthlyCredits,
+      monthlyTokens,
+      monthlyCredits: undefined,
+      usedCredits: undefined,
       isTrial: args.isTrial ?? false,
       updatedAt: now,
     });

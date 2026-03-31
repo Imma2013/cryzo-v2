@@ -10,7 +10,6 @@ import {
   type UIMessage,
 } from "ai";
 import { api as convexApi } from "../../../convex/_generated/api";
-import { tokensToCredits } from "../../../lib/pricing";
 
 const TOOLKITS = [
   "gmail",
@@ -83,7 +82,6 @@ export async function POST(req: Request) {
         inputTokens,
         outputTokens,
         totalTokens,
-        creditsCharged: tokensToCredits(totalTokens, "gpt-5.4"),
       });
     },
   });
