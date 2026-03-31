@@ -18,11 +18,15 @@ export function BillingView({
   userEmail,
   billingSummary,
   isLoadingBilling,
+  isLiveEstimating,
+  provisionalUsedTokens,
 }: {
   userId: string | null;
   userEmail?: string | null;
   billingSummary?: ReturnType<typeof useBillingSummary>["billingSummary"];
   isLoadingBilling?: boolean;
+  isLiveEstimating?: boolean;
+  provisionalUsedTokens?: number;
 }) {
   const activePlan =
     billingSummary ? PLAN_CONFIG[billingSummary.plan] : PLAN_CONFIG.free;
@@ -79,6 +83,11 @@ export function BillingView({
                 <p className="mt-2 text-2xl font-semibold text-foreground">
                   {formatTokenCount(billingSummary?.remainingTokens ?? 0)}
                 </p>
+                {isLiveEstimating ? (
+                  <p className="mt-1 text-xs text-amber-600">
+                    Live estimate during streaming
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-xl border border-border bg-background p-4">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -87,6 +96,11 @@ export function BillingView({
                 <p className="mt-2 text-2xl font-semibold text-foreground">
                   {formatTokenCount(billingSummary?.totalTokensUsed ?? 0)}
                 </p>
+                {isLiveEstimating ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    +{formatTokenCount(provisionalUsedTokens ?? 0)} in-flight
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-xl border border-border bg-background p-4">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">

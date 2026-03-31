@@ -93,6 +93,7 @@ export default function ChatPage() {
     user?.uid ?? null,
     provisionalUsedTokens,
   );
+  const isLiveEstimating = provisionalUsedTokens > 0;
 
   activeChatIdRef.current = activeChatId;
 
@@ -333,7 +334,7 @@ export default function ChatPage() {
               </p>
               <p className="text-sm font-medium text-black">
                 {formatTokenCount(billingSummary?.remainingTokens ?? 0)}
-                {provisionalUsedTokens > 0 ? (
+                {isLiveEstimating ? (
                   <span className="ml-1 text-[10px] text-neutral-400">live</span>
                 ) : null}
               </p>
@@ -539,6 +540,8 @@ export default function ChatPage() {
               userEmail={user?.email}
               billingSummary={billingSummary}
               isLoadingBilling={isLoadingBilling}
+              isLiveEstimating={isLiveEstimating}
+              provisionalUsedTokens={provisionalUsedTokens}
             />
           </div>
         )}

@@ -44,5 +44,7 @@ export function useBillingSummary(
   return {
     billingSummary: optimisticBillingSummary,
     isLoadingBilling: userId ? billingSummary === undefined : false,
+    isLiveEstimating: provisionalUsedTokens > 0,
+    provisionalUsedTokens,
   };
 }
