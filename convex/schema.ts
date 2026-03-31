@@ -12,4 +12,34 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_updated", ["userId", "updatedAt"]),
+  billingProfiles: defineTable({
+    userId: v.string(),
+    plan: v.union(
+      v.literal("free"),
+      v.literal("pro"),
+      v.literal("business"),
+      v.literal("enterprise"),
+    ),
+    subscriptionStatus: v.string(),
+    stripeCustomerId: v.optional(v.string()),
+    stripeSubscriptionId: v.optional(v.string()),
+    monthlyCredits: v.number(),
+    usedCredits: v.number(),
+    totalTokensUsed: v.number(),
+    cycleStart: v.string(),
+    cycleEnd: v.string(),
+    isTrial: v.boolean(),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+  }).index("by_user", ["userId"]),
+  usageEvents: defineTable({
+    userId: v.string(),
+    plan: v.string(),
+    model: v.optional(v.string()),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    totalTokens: v.number(),
+    creditsCharged: v.number(),
+    createdAt: v.string(),
+  }).index("by_user_created", ["userId", "createdAt"]),
 });

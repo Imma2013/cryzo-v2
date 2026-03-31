@@ -447,7 +447,7 @@ export default function ChatPage() {
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
-            <BillingView />
+            <BillingView userId={user?.uid ?? null} />
           </div>
         )}
       </section>

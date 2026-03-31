@@ -1,6 +1,7 @@
 import { openai } from "@ai-sdk/openai";
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
+import { ConvexHttpClient } from "convex/browser";
 import {
   streamText,
   convertToModelMessages,
@@ -8,6 +9,8 @@ import {
   stepCountIs,
   type UIMessage,
 } from "ai";
+import { api as convexApi } from "../../../convex/_generated/api";
+import { tokensToCredits } from "../../../lib/pricing";
 
 const TOOLKITS = [
   "gmail",
@@ -44,6 +47,8 @@ const TOOLKITS = [
 
 export async function POST(req: Request) {
   const composio = new Composio({ provider: new VercelProvider() });
+  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+  const convex = convexUrl ? new ConvexHttpClient(convexUrl) : null;
   const {
     messages,
     userId,
@@ -58,6 +63,29 @@ export async function POST(req: Request) {
     messages: await convertToModelMessages(messages),
     tools,
     stopWhen: stepCountIs(10),
+    onFinish: async ({ usage }) => {
+      if (!convex || !userId || !usage) {
+        return;
+      }
+
+      const inputTokens = usage.inputTokens ?? 0;
+      const outputTokens = usage.outputTokens ?? 0;
+      const totalTokens =
+        usage.totalTokens ?? inputTokens + outputTokens;
+
+      if (totalTokens <= 0) {
+        return;
+      }
+
+      await convex.mutation(convexApi.billing.recordUsage, {
+        userId,
+        model: "gpt-5.4",
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        creditsCharged: tokensToCredits(totalTokens, "gpt-5.4"),
+      });
+    },
   });
   return result.toUIMessageStreamResponse({
     originalMessages: messages,
