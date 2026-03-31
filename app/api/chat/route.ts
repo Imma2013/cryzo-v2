@@ -44,9 +44,12 @@ const TOOLKITS = [
 
 export async function POST(req: Request) {
   const composio = new Composio({ provider: new VercelProvider() });
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  const {
+    messages,
+    userId,
+  }: { messages: UIMessage[]; userId?: string } = await req.json();
   const session = await composio.create(
-    "pg-test-pg-test-43d08743-c471-4d27-ac73-9b9398880252",
+    userId || "pg-test-pg-test-43d08743-c471-4d27-ac73-9b9398880252",
   );
   const tools = await session.tools();
   const result = streamText({

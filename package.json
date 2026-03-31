@@ -19,10 +19,12 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "convex": "^1.34.1",
+    "firebase": "^12.11.0",
     "lucide-react": "^1.7.0",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "react-firebase-hooks": "^5.1.1",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "latest"
   },

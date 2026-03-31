@@ -1,7 +1,7 @@
 import { Composio } from "@composio/core";
 
 const composio = new Composio();
-const EXTERNAL_USER_ID = "pg-test-pg-test-43d08743-c471-4d27-ac73-9b9398880252";
+const FALLBACK_USER_ID = "pg-test-pg-test-43d08743-c471-4d27-ac73-9b9398880252";
 
 const TOOLKITS = [
   "gmail",
@@ -79,9 +79,11 @@ function getToolkitLogo(slug: string, logo?: string) {
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const session = await composio.create(EXTERNAL_USER_ID);
+    const userId =
+      new URL(req.url).searchParams.get("userId") || FALLBACK_USER_ID;
+    const session = await composio.create(userId);
     const { items } = await session.toolkits({ toolkits: TOOLKITS });
     const toolkitsBySlug = new Map(
       items.map((toolkit) => [normalizeToolkitSlug(toolkit.slug), toolkit]),
@@ -107,9 +109,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { toolkit }: { toolkit: string } = await req.json();
+  const { toolkit, userId }: { toolkit: string; userId?: string } = await req.json();
   const origin = new URL(req.url).origin;
-  const session = await composio.create(EXTERNAL_USER_ID);
+  const session = await composio.create(userId || FALLBACK_USER_ID);
   const connectionRequest = await session.authorize(toolkit, {
     callbackUrl: origin,
   });

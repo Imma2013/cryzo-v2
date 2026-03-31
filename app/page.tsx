@@ -4,16 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport, getToolName, isToolUIPart } from "ai";
+import { signInWithPopup, signOut } from "firebase/auth";
+import { useAuthState } from "react-firebase-hooks/auth";
 import { BillingView } from "../components/billing/billing-view";
 import { ChatSidebar } from "../components/chat/chat-sidebar";
 import { ToolCallDisplay } from "../components/ToolCallDisplay";
 import { useChatHistory } from "../hooks/use-chat-history";
 import { useLocalStorage } from "../hooks/use-local-storage";
+import { auth, googleProvider } from "../lib/firebase";
 
 export default function ChatPage() {
   const [activeView, setActiveView] = useState<"chat" | "apps" | "billing">(
     "chat",
   );
+  const [user, authLoading] = useAuthState(auth);
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage(
     "composio-chat:sidebar:collapsed",
     false,
@@ -33,7 +37,7 @@ export default function ChatPage() {
     selectChat,
     deleteChat,
     saveMessages,
-  } = useChatHistory();
+  } = useChatHistory(user?.uid ?? null);
 
   const {
     messages,
@@ -41,7 +45,10 @@ export default function ChatPage() {
     setMessages,
     status,
   } = useChat<UIMessage>({
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      body: { userId: user?.uid },
+    }),
   });
 
   const [activeChatId, setActiveChatId, activeChatHydrated] = useLocalStorage<
@@ -68,21 +75,24 @@ export default function ChatPage() {
   }, [messages, isLoading]);
 
   useEffect(() => {
+    if (!user?.uid) return;
     if (activeView === "apps") {
       void fetchConnections();
     }
-  }, [activeView]);
+  }, [activeView, user?.uid]);
 
   useEffect(() => {
+    if (!user?.uid) return;
     if (!activeChatHydrated) return;
     if (!activeChatId) return;
     void (async () => {
       const selectedMessages = await selectChat(activeChatId);
       setMessages(selectedMessages);
     })();
-  }, [activeChatHydrated, activeChatId, selectChat, setMessages]);
+  }, [activeChatHydrated, activeChatId, selectChat, setMessages, user?.uid]);
 
   useEffect(() => {
+    if (!user?.uid) return;
     if (!activeChatIdRef.current || messages.length === 0) return;
 
     if (saveTimeoutRef.current) {
@@ -98,9 +108,17 @@ export default function ChatPage() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [messages, saveMessages]);
+  }, [messages, saveMessages, user?.uid]);
+
+  useEffect(() => {
+    if (user) return;
+    setActiveChatId(null);
+    setMessages([]);
+    setToolkits([]);
+  }, [setActiveChatId, setMessages, user]);
 
   async function handleSelectChat(chatId: string) {
+    if (!user?.uid) return;
     setActiveView("chat");
     setActiveChatId(chatId);
     const selectedMessages = await selectChat(chatId);
@@ -108,6 +126,7 @@ export default function ChatPage() {
   }
 
   async function handleNewChat() {
+    if (!user?.uid) return;
     const newChat = await createChat();
     if (!newChat) return;
     setActiveView("chat");
@@ -117,6 +136,7 @@ export default function ChatPage() {
   }
 
   async function handleDeleteChat(chatId: string) {
+    if (!user?.uid) return;
     await deleteChat(chatId);
     if (activeChatId !== chatId) return;
 
@@ -130,17 +150,22 @@ export default function ChatPage() {
   }
 
   async function fetchConnections() {
-    const res = await fetch("/api/connections", { cache: "no-store" });
+    if (!user?.uid) return;
+    const res = await fetch(
+      `/api/connections?userId=${encodeURIComponent(user.uid)}`,
+      { cache: "no-store" },
+    );
     if (!res.ok) return;
     const data = await res.json();
     setToolkits(data.toolkits ?? []);
   }
 
   async function connect(slug: string) {
+    if (!user?.uid) return;
     const res = await fetch("/api/connections", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolkit: slug }),
+      body: JSON.stringify({ toolkit: slug, userId: user.uid }),
     });
     if (!res.ok) return;
     const data = await res.json();
@@ -156,8 +181,41 @@ export default function ChatPage() {
     await fetchConnections();
   }
 
+  async function handleSignIn() {
+    await signInWithPopup(auth, googleProvider);
+  }
+
+  async function handleSignOut() {
+    await signOut(auth);
+  }
+
   if (!sidebarHydrated || !activeChatHydrated) {
     return <main className="h-screen bg-neutral-50" />;
+  }
+
+  if (authLoading) {
+    return <main className="h-screen bg-neutral-50" />;
+  }
+
+  if (!user) {
+    return (
+      <main className="flex h-screen items-center justify-center bg-neutral-50 px-6">
+        <div className="w-full max-w-md rounded-3xl border border-neutral-200 bg-white p-8 shadow-sm">
+          <div className="mb-6">
+            <h1 className="text-2xl font-semibold text-black">Sign in</h1>
+            <p className="mt-2 text-sm text-neutral-500">
+              Use Google first. Chat history will be stored in Convex under your account.
+            </p>
+          </div>
+          <button
+            onClick={() => void handleSignIn()}
+            className="w-full rounded-xl bg-black px-4 py-3 text-sm font-medium text-white hover:bg-neutral-800"
+          >
+            Continue with Google
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -176,7 +234,7 @@ export default function ChatPage() {
       />
 
       <section className="flex min-w-0 flex-1 flex-col bg-white">
-        <div className="h-14 shrink-0 border-b border-neutral-200 flex items-center px-3">
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-200 px-3">
           <button
             onClick={() => setSidebarCollapsed((value) => !value)}
             className="flex h-8 w-8 items-center justify-center rounded-xl text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-black"
@@ -200,6 +258,20 @@ export default function ChatPage() {
               )}
             </svg>
           </button>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <p className="text-sm font-medium text-black">
+                {user.displayName || user.email || "Signed in"}
+              </p>
+              <p className="text-xs text-neutral-500">{user.email}</p>
+            </div>
+            <button
+              onClick={() => void handleSignOut()}
+              className="rounded-lg border border-neutral-200 px-3 py-2 text-sm hover:bg-neutral-50"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
         {activeView === "chat" ? (
           <>

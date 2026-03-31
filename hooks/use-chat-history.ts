@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import type { UIMessage } from "ai";
+import type { Id } from "../convex/_generated/dataModel";
+import { api } from "../convex/_generated/api";
 
 export type ChatSummary = {
   id: string;
@@ -12,99 +14,60 @@ export type ChatSummary = {
   messageCount: number;
 };
 
-export function useChatHistory() {
-  const [chats, setChats] = useState<ChatSummary[]>([]);
-  const [isLoadingChats, setIsLoadingChats] = useState(true);
+export function useChatHistory(userId: string | null) {
+  const convex = useConvex();
+  const chats = useQuery(
+    api.chats.listChats,
+    userId ? { userId } : "skip",
+  );
+  const createChatMutation = useMutation(api.chats.createChat);
+  const deleteChatMutation = useMutation(api.chats.deleteChat);
+  const saveMessagesMutation = useMutation(api.chats.saveMessages);
 
-  const fetchChats = useCallback(async () => {
-    setIsLoadingChats(true);
-    try {
-      const response = await fetch("/api/chats", { cache: "no-store" });
-      if (!response.ok) {
-        throw new Error("Failed to fetch chats");
-      }
-      const data = await response.json();
-      setChats(data.chats ?? []);
-    } catch {
-      setChats([]);
-    } finally {
-      setIsLoadingChats(false);
-    }
-  }, []);
+  const isLoadingChats = userId ? chats === undefined : false;
 
-  const createChat = useCallback(async (model?: string) => {
-    const response = await fetch("/api/chats", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model }),
-    });
-    if (!response.ok) {
+  async function createChat(model?: string) {
+    if (!userId) {
       return null;
     }
-    const data = await response.json();
-    const newChat = data.chat as ChatSummary;
-    setChats((prev) => [newChat, ...prev]);
-    return newChat;
-  }, []);
+    const chat = await createChatMutation({ userId, model });
+    return chat as ChatSummary;
+  }
 
-  const selectChat = useCallback(async (chatId: string): Promise<UIMessage[]> => {
-    const response = await fetch(`/api/chats/${chatId}`);
-    if (!response.ok) {
+  async function selectChat(chatId: string): Promise<UIMessage[]> {
+    if (!userId) {
       return [];
     }
-    const data = await response.json();
-    return data.chat.messages ?? [];
-  }, []);
-
-  const deleteChat = useCallback(async (chatId: string) => {
-    const response = await fetch(`/api/chats/${chatId}`, {
-      method: "DELETE",
+    const chat = await convex.query(api.chats.getChat, {
+      chatId: chatId as Id<"chats">,
+      userId,
     });
-    if (!response.ok) {
+    return (chat?.messages ?? []) as UIMessage[];
+  }
+
+  async function deleteChat(chatId: string) {
+    if (!userId) {
       return;
     }
-    setChats((prev) => prev.filter((chat) => chat.id !== chatId));
-  }, []);
-
-  const saveMessages = useCallback(async (chatId: string, messages: UIMessage[]) => {
-    if (messages.length === 0) return;
-
-    const response = await fetch(`/api/chats/${chatId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages }),
+    await deleteChatMutation({
+      chatId: chatId as Id<"chats">,
+      userId,
     });
+  }
 
-    if (!response.ok) {
+  async function saveMessages(chatId: string, messages: UIMessage[]) {
+    if (!userId || messages.length === 0) {
       return;
     }
-
-    const data = await response.json();
-    setChats((prev) =>
-      prev
-        .map((chat) =>
-          chat.id === chatId
-            ? {
-                ...chat,
-                title: data.title || chat.title,
-                updatedAt: new Date().toISOString(),
-                messageCount: messages.length,
-              }
-            : chat,
-        )
-        .sort(
-          (a, b) =>
-            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-        ),
-    );
-  }, []);
-
-  useEffect(() => {
-    fetchChats();
-  }, [fetchChats]);
+    await saveMessagesMutation({
+      chatId: chatId as Id<"chats">,
+      userId,
+      messages,
+    });
+  }
 
   return {
-    chats,
+    chats: chats ?? [],
     isLoadingChats,
     createChat,
     selectChat,
