@@ -1,20 +1,35 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { getCurrentBillingWindow, getMonthlyTokensForPlan, type PlanId } from "../lib/pricing";
+import {
+  getCurrentBillingWindow,
+  getMonthlyTokensForPlan,
+  LEGACY_TOKENS_PER_CREDIT,
+  type PlanId,
+} from "../lib/pricing";
 
 function getStoredMonthlyTokens(profile: {
   monthlyTokens?: number;
   monthlyCredits?: number;
   plan: PlanId | string;
 }) {
-  return profile.monthlyTokens ?? profile.monthlyCredits ?? getMonthlyTokensForPlan(profile.plan as PlanId);
+  return (
+    profile.monthlyTokens ??
+    (profile.monthlyCredits !== undefined
+      ? profile.monthlyCredits * LEGACY_TOKENS_PER_CREDIT
+      : getMonthlyTokensForPlan(profile.plan as PlanId))
+  );
 }
 
 function getStoredUsedTokens(profile: {
   usedTokens?: number;
   usedCredits?: number;
 }) {
-  return profile.usedTokens ?? profile.usedCredits ?? 0;
+  return (
+    profile.usedTokens ??
+    (profile.usedCredits !== undefined
+      ? profile.usedCredits * LEGACY_TOKENS_PER_CREDIT
+      : 0)
+  );
 }
 
 async function getOrCreateBillingProfile(
@@ -45,6 +60,28 @@ async function getOrCreateBillingProfile(
 
     const id = await ctx.db.insert("billingProfiles", profile);
     return { _id: id, ...profile };
+  }
+
+  if (existing.monthlyTokens === undefined || existing.usedTokens === undefined) {
+    const migratedMonthlyTokens = getStoredMonthlyTokens(existing);
+    const migratedUsedTokens = getStoredUsedTokens(existing);
+
+    await ctx.db.patch(existing._id, {
+      monthlyTokens: migratedMonthlyTokens,
+      usedTokens: migratedUsedTokens,
+      monthlyCredits: undefined,
+      usedCredits: undefined,
+      updatedAt: now,
+    });
+
+    return {
+      ...existing,
+      monthlyTokens: migratedMonthlyTokens,
+      usedTokens: migratedUsedTokens,
+      monthlyCredits: undefined,
+      usedCredits: undefined,
+      updatedAt: now,
+    };
   }
 
   if (new Date(existing.cycleEnd).getTime() <= Date.now()) {

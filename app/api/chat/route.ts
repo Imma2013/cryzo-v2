@@ -52,6 +52,23 @@ export async function POST(req: Request) {
     messages,
     userId,
   }: { messages: UIMessage[]; userId?: string } = await req.json();
+
+  if (convex && userId) {
+    const billingSummary = await convex.query(convexApi.billing.getBillingSummary, {
+      userId,
+    });
+
+    if ((billingSummary?.remainingTokens ?? 0) <= 0) {
+      return Response.json(
+        {
+          error:
+            "Monthly token limit reached. Upgrade your plan or wait for the next billing cycle.",
+        },
+        { status: 402 },
+      );
+    }
+  }
+
   const session = await composio.create(
     userId || "pg-test-pg-test-43d08743-c471-4d27-ac73-9b9398880252",
   );

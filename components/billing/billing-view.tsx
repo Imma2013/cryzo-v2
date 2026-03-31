@@ -5,8 +5,8 @@ import { CreditCard } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Pricing } from "@/components/ui/pricing-table";
-import { useBillingSummary } from "@/hooks/use-billing-summary";
 import { formatTokenCount, PLAN_CONFIG, type PlanId } from "@/lib/pricing";
+import type { useBillingSummary } from "@/hooks/use-billing-summary";
 
 const billingLinks = {
   enterprise: process.env.NEXT_PUBLIC_STRIPE_CONTACT_SALES_URL || "#",
@@ -16,11 +16,14 @@ const billingLinks = {
 export function BillingView({
   userId,
   userEmail,
+  billingSummary,
+  isLoadingBilling,
 }: {
   userId: string | null;
   userEmail?: string | null;
+  billingSummary?: ReturnType<typeof useBillingSummary>["billingSummary"];
+  isLoadingBilling?: boolean;
 }) {
-  const { billingSummary, isLoadingBilling } = useBillingSummary(userId);
   const activePlan =
     billingSummary ? PLAN_CONFIG[billingSummary.plan] : PLAN_CONFIG.free;
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);

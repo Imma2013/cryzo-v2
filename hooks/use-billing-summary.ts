@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 
-export function useBillingSummary(userId: string | null) {
+export function useBillingSummary(
+  userId: string | null,
+  provisionalUsedTokens = 0,
+) {
   const ensureBillingProfile = useMutation(api.billing.ensureBillingProfile);
   const billingSummary = useQuery(
     api.billing.getBillingSummary,
@@ -19,8 +22,27 @@ export function useBillingSummary(userId: string | null) {
     void ensureBillingProfile({ userId });
   }, [ensureBillingProfile, userId]);
 
+  const optimisticBillingSummary = useMemo(() => {
+    if (!billingSummary) {
+      return billingSummary;
+    }
+
+    if (provisionalUsedTokens <= 0) {
+      return billingSummary;
+    }
+
+    const totalUsed = billingSummary.totalTokensUsed + provisionalUsedTokens;
+    const remaining = Math.max(billingSummary.monthlyTokens - totalUsed, 0);
+
+    return {
+      ...billingSummary,
+      totalTokensUsed: totalUsed,
+      remainingTokens: remaining,
+    };
+  }, [billingSummary, provisionalUsedTokens]);
+
   return {
-    billingSummary,
+    billingSummary: optimisticBillingSummary,
     isLoadingBilling: userId ? billingSummary === undefined : false,
   };
 }

@@ -1,5 +1,7 @@
 export type PlanId = "free" | "pro" | "business" | "enterprise";
 
+export const LEGACY_TOKENS_PER_CREDIT = 7_500;
+
 export const PLAN_CONFIG: Record<PlanId, {
   id: PlanId;
   name: string;

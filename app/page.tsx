@@ -9,9 +9,30 @@ import { useAuthState } from "react-firebase-hooks/auth";
 import { BillingView } from "../components/billing/billing-view";
 import { ChatSidebar } from "../components/chat/chat-sidebar";
 import { ToolCallDisplay } from "../components/ToolCallDisplay";
+import { useBillingSummary } from "../hooks/use-billing-summary";
 import { useChatHistory } from "../hooks/use-chat-history";
 import { useLocalStorage } from "../hooks/use-local-storage";
 import { auth, googleProvider } from "../lib/firebase";
+import { formatTokenCount } from "../lib/pricing";
+
+function estimateTextTokens(text: string) {
+  return Math.max(0, Math.ceil(text.trim().length / 4));
+}
+
+function estimateMessageTokens(messages: UIMessage[]) {
+  return messages.reduce((total, message) => {
+    return (
+      total +
+      message.parts.reduce((partTotal, part) => {
+        if (part.type !== "text") {
+          return partTotal;
+        }
+
+        return partTotal + estimateTextTokens(String(part.text ?? ""));
+      }, 0)
+    );
+  }, 0);
+}
 
 export default function ChatPage() {
   const [activeView, setActiveView] = useState<"chat" | "apps" | "billing">(
@@ -29,6 +50,10 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
+  const provisionalPromptTokensRef = useRef(0);
+  const assistantTokenBaselineRef = useRef(0);
+  const resetStreamingEstimateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [provisionalUsedTokens, setProvisionalUsedTokens] = useState(0);
 
   const {
     chats,
@@ -64,6 +89,10 @@ export default function ChatPage() {
       connectedAccountId?: string;
     }[]
   >([]);
+  const { billingSummary, isLoadingBilling } = useBillingSummary(
+    user?.uid ?? null,
+    provisionalUsedTokens,
+  );
 
   activeChatIdRef.current = activeChatId;
 
@@ -73,6 +102,42 @@ export default function ChatPage() {
     if (!scrollRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    const currentAssistantTokens = messages.reduce((total, message) => {
+      if (message.role !== "assistant") {
+        return total;
+      }
+      return total + estimateMessageTokens([message]);
+    }, 0);
+
+    if (status === "submitted" || status === "streaming") {
+      const streamedAssistantTokens = Math.max(
+        0,
+        currentAssistantTokens - assistantTokenBaselineRef.current,
+      );
+      setProvisionalUsedTokens(
+        provisionalPromptTokensRef.current + streamedAssistantTokens,
+      );
+      return;
+    }
+
+    if (resetStreamingEstimateTimeoutRef.current) {
+      clearTimeout(resetStreamingEstimateTimeoutRef.current);
+    }
+
+    resetStreamingEstimateTimeoutRef.current = setTimeout(() => {
+      provisionalPromptTokensRef.current = 0;
+      assistantTokenBaselineRef.current = 0;
+      setProvisionalUsedTokens(0);
+    }, 1200);
+
+    return () => {
+      if (resetStreamingEstimateTimeoutRef.current) {
+        clearTimeout(resetStreamingEstimateTimeoutRef.current);
+      }
+    };
+  }, [messages, status]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -115,6 +180,9 @@ export default function ChatPage() {
     setActiveChatId(null);
     setMessages([]);
     setToolkits([]);
+    provisionalPromptTokensRef.current = 0;
+    assistantTokenBaselineRef.current = 0;
+    setProvisionalUsedTokens(0);
   }, [setActiveChatId, setMessages, user]);
 
   async function handleSelectChat(chatId: string) {
@@ -259,6 +327,17 @@ export default function ChatPage() {
             </svg>
           </button>
           <div className="flex items-center gap-3">
+            <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-right">
+              <p className="text-[10px] uppercase tracking-wide text-neutral-500">
+                Remaining tokens
+              </p>
+              <p className="text-sm font-medium text-black">
+                {formatTokenCount(billingSummary?.remainingTokens ?? 0)}
+                {provisionalUsedTokens > 0 ? (
+                  <span className="ml-1 text-[10px] text-neutral-400">live</span>
+                ) : null}
+              </p>
+            </div>
             <div className="text-right">
               <p className="text-sm font-medium text-black">
                 {user.displayName || user.email || "Signed in"}
@@ -366,6 +445,14 @@ export default function ChatPage() {
                     setActiveChatId(chatId);
                   }
 
+                  provisionalPromptTokensRef.current =
+                    estimateMessageTokens(messages) + estimateTextTokens(input);
+                  assistantTokenBaselineRef.current = messages.reduce(
+                    (total, message) =>
+                      total + (message.role === "assistant" ? estimateMessageTokens([message]) : 0),
+                    0,
+                  );
+                  setProvisionalUsedTokens(provisionalPromptTokensRef.current);
                   sendMessage({ text: input });
                   setInput("");
                 }}
@@ -447,7 +534,12 @@ export default function ChatPage() {
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
-            <BillingView userId={user?.uid ?? null} userEmail={user?.email} />
+            <BillingView
+              userId={user?.uid ?? null}
+              userEmail={user?.email}
+              billingSummary={billingSummary}
+              isLoadingBilling={isLoadingBilling}
+            />
           </div>
         )}
       </section>
