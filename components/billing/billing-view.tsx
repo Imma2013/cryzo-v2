@@ -6,7 +6,6 @@ import { CreditCard } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Pricing } from "@/components/ui/pricing-table";
 import {
-  formatTokenCount,
   PLAN_CONFIG,
   tokensToCredits,
   type PlanId,
@@ -118,11 +117,6 @@ export function BillingView({
                 <p className="mt-2 text-2xl font-semibold text-foreground">
                   {monthlyCredits.toLocaleString()}
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatTokenCount(
-                    billingSummary?.monthlyTokens ?? PLAN_CONFIG.free.monthlyTokens,
-                  )} tokens under the hood
-                </p>
               </div>
             </div>
           </div>
@@ -136,7 +130,7 @@ export function BillingView({
           </div>
         }
         title="Billing"
-        subtitle="Plans are sold in monthly credits. We meter actual model token usage server-side and convert it into credits behind the scenes."
+        subtitle="Plans are sold in monthly credits with fixed monthly allowances."
         tiers={[
           {
             name: PLAN_CONFIG.free.name,
@@ -203,7 +197,7 @@ export function BillingView({
           },
         ]}
         footerTitle="How usage is billed"
-        footerDescription="We expose credits in the UI and meter real model token usage server-side against your monthly plan allowance."
+        footerDescription="Usage is tracked against your monthly credit allowance and resets each billing cycle."
         footerButtonText="Learn more"
         footerButtonHref={billingLinks.student}
         className="py-10"

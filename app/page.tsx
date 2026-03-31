@@ -334,9 +334,6 @@ export default function ChatPage() {
               </p>
               <p className="text-sm font-medium text-black">
                 {tokensToCredits(billingSummary?.remainingTokens ?? 0).toLocaleString()}
-                {isLiveEstimating ? (
-                  <span className="ml-1 text-[10px] text-neutral-400">live</span>
-                ) : null}
               </p>
             </div>
             <div className="text-right">
