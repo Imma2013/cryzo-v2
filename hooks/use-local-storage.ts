@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export function useLocalStorage<T>(key: string, initialValue: T) {
   const [storedValue, setStoredValue] = useState<T>(initialValue);
@@ -19,14 +19,17 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
     }
   }, [initialValue, key]);
 
-  const setValue = (value: T | ((value: T) => T)) => {
-    setStoredValue((currentValue) => {
-      const valueToStore =
-        value instanceof Function ? value(currentValue) : value;
-      window.localStorage.setItem(key, JSON.stringify(valueToStore));
-      return valueToStore;
-    });
-  };
+  const setValue = useCallback(
+    (value: T | ((value: T) => T)) => {
+      setStoredValue((currentValue) => {
+        const valueToStore =
+          value instanceof Function ? value(currentValue) : value;
+        window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        return valueToStore;
+      });
+    },
+    [key],
+  );
 
   return [storedValue, setValue, isHydrated] as const;
 }
