@@ -84,6 +84,24 @@ async function getOrCreateBillingProfile(
     };
   }
 
+  const expectedMonthlyTokens = getMonthlyTokensForPlan(existing.plan as PlanId);
+  if (existing.monthlyTokens !== expectedMonthlyTokens) {
+    await ctx.db.patch(existing._id, {
+      monthlyTokens: expectedMonthlyTokens,
+      monthlyCredits: undefined,
+      usedCredits: undefined,
+      updatedAt: now,
+    });
+
+    return {
+      ...existing,
+      monthlyTokens: expectedMonthlyTokens,
+      monthlyCredits: undefined,
+      usedCredits: undefined,
+      updatedAt: now,
+    };
+  }
+
   if (new Date(existing.cycleEnd).getTime() <= Date.now()) {
     const refreshedWindow = getCurrentBillingWindow();
     const monthlyTokens = getMonthlyTokensForPlan(existing.plan as PlanId);
