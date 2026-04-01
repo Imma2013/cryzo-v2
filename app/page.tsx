@@ -13,7 +13,7 @@ import { useBillingSummary } from "../hooks/use-billing-summary";
 import { useChatHistory } from "../hooks/use-chat-history";
 import { useLocalStorage } from "../hooks/use-local-storage";
 import { auth, googleProvider } from "../lib/firebase";
-import { formatTokenCount, tokensToCredits } from "../lib/pricing";
+import { tokensToCredits } from "../lib/pricing";
 
 function estimateTextTokens(text: string) {
   return Math.max(0, Math.ceil(text.trim().length / 4));
@@ -52,8 +52,9 @@ export default function ChatPage() {
   const activeChatIdRef = useRef<string | null>(null);
   const provisionalPromptTokensRef = useRef(0);
   const assistantTokenBaselineRef = useRef(0);
-  const resetStreamingEstimateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usageBaselineRef = useRef(0);
   const [provisionalUsedTokens, setProvisionalUsedTokens] = useState(0);
+  const [pendingReconciliationTokens, setPendingReconciliationTokens] = useState(0);
 
   const {
     chats,
@@ -91,9 +92,10 @@ export default function ChatPage() {
   >([]);
   const { billingSummary, isLoadingBilling } = useBillingSummary(
     user?.uid ?? null,
-    provisionalUsedTokens,
+    provisionalUsedTokens > 0 ? provisionalUsedTokens : pendingReconciliationTokens,
   );
-  const isLiveEstimating = provisionalUsedTokens > 0;
+  const isLiveEstimating =
+    provisionalUsedTokens > 0 || pendingReconciliationTokens > 0;
 
   activeChatIdRef.current = activeChatId;
 
@@ -123,22 +125,25 @@ export default function ChatPage() {
       return;
     }
 
-    if (resetStreamingEstimateTimeoutRef.current) {
-      clearTimeout(resetStreamingEstimateTimeoutRef.current);
+    if (provisionalUsedTokens > 0) {
+      setPendingReconciliationTokens(provisionalUsedTokens);
     }
 
-    resetStreamingEstimateTimeoutRef.current = setTimeout(() => {
-      provisionalPromptTokensRef.current = 0;
-      assistantTokenBaselineRef.current = 0;
-      setProvisionalUsedTokens(0);
-    }, 1200);
+    provisionalPromptTokensRef.current = 0;
+    assistantTokenBaselineRef.current = 0;
+    setProvisionalUsedTokens(0);
+  }, [messages, provisionalUsedTokens, status]);
 
-    return () => {
-      if (resetStreamingEstimateTimeoutRef.current) {
-        clearTimeout(resetStreamingEstimateTimeoutRef.current);
-      }
-    };
-  }, [messages, status]);
+  useEffect(() => {
+    if (!billingSummary || pendingReconciliationTokens <= 0) {
+      return;
+    }
+
+    if (billingSummary.totalTokensUsed > usageBaselineRef.current) {
+      usageBaselineRef.current = billingSummary.totalTokensUsed;
+      setPendingReconciliationTokens(0);
+    }
+  }, [billingSummary, pendingReconciliationTokens]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -183,7 +188,9 @@ export default function ChatPage() {
     setToolkits([]);
     provisionalPromptTokensRef.current = 0;
     assistantTokenBaselineRef.current = 0;
+    usageBaselineRef.current = 0;
     setProvisionalUsedTokens(0);
+    setPendingReconciliationTokens(0);
   }, [setActiveChatId, setMessages, user]);
 
   async function handleSelectChat(chatId: string) {
@@ -443,11 +450,13 @@ export default function ChatPage() {
 
                   provisionalPromptTokensRef.current =
                     estimateMessageTokens(messages) + estimateTextTokens(input);
+                  usageBaselineRef.current = billingSummary?.totalTokensUsed ?? 0;
                   assistantTokenBaselineRef.current = messages.reduce(
                     (total, message) =>
                       total + (message.role === "assistant" ? estimateMessageTokens([message]) : 0),
                     0,
                   );
+                  setPendingReconciliationTokens(0);
                   setProvisionalUsedTokens(provisionalPromptTokensRef.current);
                   sendMessage({ text: input });
                   setInput("");
@@ -536,7 +545,11 @@ export default function ChatPage() {
               billingSummary={billingSummary}
               isLoadingBilling={isLoadingBilling}
               isLiveEstimating={isLiveEstimating}
-              provisionalUsedTokens={provisionalUsedTokens}
+              provisionalUsedTokens={
+                provisionalUsedTokens > 0
+                  ? provisionalUsedTokens
+                  : pendingReconciliationTokens
+              }
             />
           </div>
         )}
