@@ -73,7 +73,7 @@ export default function ChatPage() {
   } = useChat<UIMessage>({
     transport: new DefaultChatTransport({
       api: "/api/chat",
-      body: { userId: user?.uid },
+      body: () => ({ userId: user?.uid }),
     }),
   });
 
@@ -458,7 +458,10 @@ export default function ChatPage() {
                   );
                   setPendingReconciliationTokens(0);
                   setProvisionalUsedTokens(provisionalPromptTokensRef.current);
-                  sendMessage({ text: input });
+                  sendMessage(
+                    { text: input },
+                    { body: { userId: user.uid } },
+                  );
                   setInput("");
                 }}
                 className="mx-auto flex max-w-3xl gap-3"
