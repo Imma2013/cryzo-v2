@@ -50,39 +50,57 @@ After creating, call CRYZO_SCHEDULE_RECIPE to activate the schedule.`,
         delivery_channels?: string[];
       }) => {
         try {
-          const result = await convex.mutation(api.autonomous.createTask, {
+          const title = args.title || "Untitled Recipe";
+          const instruction = args.instruction || title;
+          const integrationSlugs = Array.isArray(args.integration_slugs)
+            ? args.integration_slugs.filter(Boolean)
+            : [];
+          const deliveryChannels = (
+            Array.isArray(args.delivery_channels) && args.delivery_channels.length > 0
+              ? args.delivery_channels
+              : ["in_app"]
+          ) as ("in_app" | "email")[];
+
+          const payload: Parameters<typeof convex.mutation<typeof api.autonomous.createTask>>[1] = {
             userId,
-            title: args.title,
-            instruction: args.instruction,
-            workflowCode: args.workflow_code,
-            integrationSlugs: args.integration_slugs,
-            deliveryChannels: (args.delivery_channels ?? ["in_app"]) as ("in_app" | "email")[],
+            title,
+            instruction,
+            integrationSlugs,
+            deliveryChannels,
             goals: ["Execute the recurring workflow on schedule"],
             successCriteria: ["Workflow completes without errors"],
             workflowType: "general_recurring_task",
-            autonomyMode: "full_auto",
-            triggerType: "schedule",
+            autonomyMode: "full_auto" as const,
+            triggerType: "schedule" as const,
             schedule: {
               cadence: "custom" as const,
               cron: args.cron,
               cronHuman: args.cron_human,
-              timezone: args.timezone ?? "UTC",
+              timezone: args.timezone || "UTC",
             },
             recipeMetadata: {
               compiler: "cryzo_chat",
               compiledAt: new Date().toISOString(),
             },
-          });
+          };
+
+          if (typeof args.workflow_code === "string" && args.workflow_code.trim()) {
+            payload.workflowCode = args.workflow_code;
+          }
+
+          const result = await convex.mutation(api.autonomous.createTask, payload);
 
           return {
             success: true,
             recipe_id: result.taskId,
-            message: `Recipe "${args.title}" created. Schedule: ${args.cron_human}. Now call CRYZO_SCHEDULE_RECIPE with recipe_id "${result.taskId}" to activate it.`,
+            message: `Recipe "${title}" created. Schedule: ${args.cron_human}. Now call CRYZO_SCHEDULE_RECIPE with recipe_id "${result.taskId}" to activate it.`,
           };
         } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error("[CRYZO_CREATE_RECIPE] Failed:", msg, { args });
           return {
             success: false,
-            error: error instanceof Error ? error.message : "Failed to create recipe",
+            error: msg,
           };
         }
       },

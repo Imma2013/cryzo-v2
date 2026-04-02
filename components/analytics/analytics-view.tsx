@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import type { ToolkitConnection } from "../autonomous/autonomous-types";
 
 /* ─── Allowed social platforms (same as Postiz) ──────────────── */
@@ -264,15 +264,42 @@ function EmptyState() {
   );
 }
 
+/* ─── Format number for display ──────────────────────────────── */
+function formatTotal(value: number): string {
+  if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + "M";
+  if (value >= 1_000) return (value / 1_000).toFixed(1) + "K";
+  return value.toLocaleString();
+}
+
+/* ─── Convert API metrics to display metrics ─────────────────── */
+function apiToDisplayMetrics(
+  apiMetrics: Array<{ label: string; total: number; change: number }>,
+): AnalyticsMetric[] {
+  return apiMetrics.map((m) => ({
+    label: m.label,
+    data: [m.total],
+    total: formatTotal(m.total),
+    change: m.change,
+  }));
+}
+
 /* ─── Main Analytics View ────────────────────────────────────── */
 type AnalyticsViewProps = {
   toolkits: ToolkitConnection[];
+  userId?: string | null;
 };
 
-export function AnalyticsView({ toolkits }: AnalyticsViewProps) {
+type FetchState = "idle" | "loading" | "done" | "error";
+
+export function AnalyticsView({ toolkits, userId }: AnalyticsViewProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dateRange, setDateRange] = useState(7);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [fetchState, setFetchState] = useState<FetchState>("idle");
+  const [liveMetrics, setLiveMetrics] = useState<AnalyticsMetric[] | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [usingMock, setUsingMock] = useState(false);
+  const cacheRef = useRef<Record<string, { metrics: AnalyticsMetric[]; ts: number }>>({}); 
 
   const socialToolkits = useMemo(() => {
     return toolkits.filter((t) =>
@@ -286,13 +313,73 @@ export function AnalyticsView({ toolkits }: AnalyticsViewProps) {
 
   const currentPlatform = connectedToolkits[selectedIndex] ?? null;
 
-  const metrics = useMemo(() => {
-    if (!currentPlatform) return [];
-    const key = SOCIAL_PLATFORMS.find((p) =>
+  const platformKey = useMemo(() => {
+    if (!currentPlatform) return null;
+    return SOCIAL_PLATFORMS.find((p) =>
       currentPlatform.slug.toLowerCase().includes(p)
-    );
-    return key ? MOCK_METRICS[key] ?? [] : [];
+    ) ?? null;
   }, [currentPlatform]);
+
+  const mockMetrics = useMemo(() => {
+    return platformKey ? MOCK_METRICS[platformKey] ?? [] : [];
+  }, [platformKey]);
+
+  const fetchAnalytics = useCallback(
+    async (force = false) => {
+      if (!platformKey || !userId) return;
+
+      const cacheKey = `${platformKey}-${dateRange}`;
+      const cached = cacheRef.current[cacheKey];
+      if (!force && cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+        setLiveMetrics(cached.metrics);
+        setUsingMock(false);
+        setFetchState("done");
+        return;
+      }
+
+      setFetchState("loading");
+      setFetchError(null);
+      setUsingMock(false);
+
+      try {
+        const res = await fetch(
+          `/api/analytics/${platformKey}?userId=${encodeURIComponent(userId)}&days=${dateRange}`,
+        );
+        const data = await res.json();
+
+        if (!res.ok || !data.metrics || data.metrics.length === 0) {
+          setLiveMetrics(null);
+          setUsingMock(true);
+          setFetchState("done");
+          return;
+        }
+
+        const converted = apiToDisplayMetrics(data.metrics);
+        cacheRef.current[cacheKey] = { metrics: converted, ts: Date.now() };
+        setLiveMetrics(converted);
+        setFetchState("done");
+      } catch (err) {
+        console.error("Analytics fetch failed:", err);
+        setFetchError(err instanceof Error ? err.message : "Fetch failed");
+        setLiveMetrics(null);
+        setUsingMock(true);
+        setFetchState("error");
+      }
+    },
+    [platformKey, userId, dateRange],
+  );
+
+  useEffect(() => {
+    if (platformKey && userId) {
+      fetchAnalytics();
+    } else {
+      setLiveMetrics(null);
+      setUsingMock(true);
+      setFetchState("idle");
+    }
+  }, [platformKey, userId, dateRange, fetchAnalytics]);
+
+  const metrics = liveMetrics ?? (usingMock || fetchState === "idle" ? mockMetrics : []);
 
   if (!connectedToolkits.length) {
     return (
@@ -415,14 +502,62 @@ export function AnalyticsView({ toolkits }: AnalyticsViewProps) {
             <DateSelector value={dateRange} onChange={setDateRange} />
           </div>
 
-          {/* Analytics Grid (Postiz layout) */}
-          {metrics.length > 0 ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {metrics.map((metric, i) => (
-                <AnalyticsCard key={metric.label} metric={metric} index={i} />
-              ))}
+          {/* Loading state */}
+          {fetchState === "loading" && (
+            <div className="flex items-center justify-center py-20">
+              <div className="flex flex-col items-center gap-3">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-200 border-t-black" />
+                <p className="text-sm text-neutral-500">
+                  Fetching {currentPlatform?.name} analytics via Composio...
+                </p>
+                <p className="text-xs text-neutral-400">This may take a few seconds</p>
+              </div>
             </div>
-          ) : (
+          )}
+
+          {/* Analytics Grid (Postiz layout) */}
+          {fetchState !== "loading" && metrics.length > 0 ? (
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {metrics.map((metric, i) => (
+                  <AnalyticsCard key={metric.label} metric={metric} index={i} />
+                ))}
+              </div>
+
+              {usingMock && (
+                <div className="mt-6 flex items-center justify-between rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3">
+                  <div>
+                    <p className="text-xs font-medium text-amber-700">
+                      Showing sample data{fetchError ? ` — ${fetchError}` : ""}
+                    </p>
+                    <p className="text-xs text-amber-600">
+                      Live analytics will load when the platform API responds.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => fetchAnalytics(true)}
+                    className="shrink-0 rounded-md bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-200 transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {!usingMock && liveMetrics && (
+                <div className="mt-6 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <p className="text-xs text-emerald-700">
+                    Live data from {currentPlatform?.name} via Composio
+                  </p>
+                  <button
+                    onClick={() => fetchAnalytics(true)}
+                    className="shrink-0 rounded-md bg-emerald-100 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-200 transition-colors"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              )}
+            </>
+          ) : fetchState !== "loading" ? (
             <div className="flex flex-col items-center justify-center rounded-xl border border-neutral-200 bg-white py-16">
               <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-neutral-100">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-neutral-400">
@@ -434,14 +569,7 @@ export function AnalyticsView({ toolkits }: AnalyticsViewProps) {
                 Analytics data will appear here once connected.
               </p>
             </div>
-          )}
-
-          {/* Mock data notice */}
-          <div className="mt-8 rounded-lg border border-dashed border-neutral-300 bg-neutral-50 p-4 text-center">
-            <p className="text-xs text-neutral-400">
-              Showing sample data — live analytics will be wired up when platform APIs are connected.
-            </p>
-          </div>
+          ) : null}
         </div>
       </div>
     </div>

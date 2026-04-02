@@ -1135,7 +1135,7 @@ export default function ChatPage() {
           </div>
         ) : activeView === "analytics" ? (
           <div className="flex-1 overflow-y-auto">
-            <AnalyticsView toolkits={toolkits} />
+            <AnalyticsView toolkits={toolkits} userId={user?.uid ?? null} />
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
