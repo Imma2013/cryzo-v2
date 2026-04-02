@@ -1,7 +1,21 @@
+import { z } from "zod";
 import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { nextCronTickFromExpression, validateCron } from "./cron";
+
+/**
+ * Minimal tool factory compatible with Vercel AI SDK streamText.
+ * Uses Zod for parameter schemas so the SDK correctly extracts args.
+ */
+function defineTool<T extends z.ZodType>(opts: {
+  description: string;
+  parameters: T;
+  execute: (args: z.infer<T>) => Promise<unknown>;
+}) {
+  return opts;
+}
 
 export function getCryzoCustomTools(
   convex: ConvexHttpClient | null,
@@ -12,71 +26,50 @@ export function getCryzoCustomTools(
   }
 
   return {
-    CRYZO_CREATE_RECIPE: {
+    CRYZO_CREATE_RECIPE: defineTool({
       description: `Create and save a new recurring task recipe backed by Convex.
-Use this when the user wants to automate a recurring task (e.g. "give me my unread emails every day").
-After creating, call CRYZO_SCHEDULE_RECIPE to activate the schedule.`,
-      parameters: {
-        type: "object" as const,
-        properties: {
-          title: { type: "string", description: "Short title (e.g. 'Daily Unread Gmail Digest')" },
-          instruction: { type: "string", description: "Natural language description of what the recipe does" },
-          workflow_code: { type: "string", description: "Python code using run_composio_tool() to execute the workflow" },
-          integration_slugs: {
-            type: "array",
-            items: { type: "string" },
-            description: "Composio toolkit slugs needed (e.g. ['gmail', 'slack'])",
-          },
-          cron: { type: "string", description: "Cron expression (e.g. '0 8 * * *' for daily at 8am)" },
-          cron_human: { type: "string", description: "Human-readable cron (e.g. 'Every day at 8:00 AM')" },
-          timezone: { type: "string", description: "IANA timezone (e.g. 'America/Chicago')", default: "UTC" },
-          delivery_channels: {
-            type: "array",
-            items: { type: "string", enum: ["in_app", "email"] },
-            description: "How to deliver results",
-            default: ["in_app"],
-          },
-        },
-        required: ["title", "instruction", "integration_slugs", "cron", "cron_human"],
-      },
-      execute: async (args: {
-        title: string;
-        instruction: string;
-        workflow_code?: string;
-        integration_slugs: string[];
-        cron: string;
-        cron_human: string;
-        timezone?: string;
-        delivery_channels?: string[];
-      }) => {
+Use this when the user wants to automate a recurring task (e.g. "send an email every day", "give me my unread emails every morning").
+The recipe is created AND scheduled in one step — no separate activation call needed.`,
+      parameters: z.object({
+        title: z.string().describe("Short title (e.g. 'Daily Email to Lloyd')"),
+        instruction: z.string().describe("Full natural-language description of what the recipe does"),
+        workflow_code: z.string().optional().describe("Optional workflow code"),
+        integration_slugs: z.array(z.string()).describe("Composio toolkit slugs needed (e.g. ['gmail', 'slack'])"),
+        cron: z.string().describe("5-field cron expression in UTC (e.g. '20 22 * * *' for daily at 10:20 PM UTC). IMPORTANT: Convert user's local time to UTC before generating the cron."),
+        cron_human: z.string().describe("Human-readable schedule (e.g. 'Every day at 4:20 PM CST')"),
+        timezone: z.string().optional().describe("IANA timezone (e.g. 'America/Chicago'). Defaults to UTC."),
+        delivery_channels: z.array(z.enum(["in_app", "email"])).optional().describe("How to deliver results. Defaults to ['in_app']."),
+      }),
+      execute: async (args) => {
         try {
-          const title = args.title || "Untitled Recipe";
-          const instruction = args.instruction || title;
-          const integrationSlugs = Array.isArray(args.integration_slugs)
-            ? args.integration_slugs.filter(Boolean)
-            : [];
-          const deliveryChannels = (
-            Array.isArray(args.delivery_channels) && args.delivery_channels.length > 0
-              ? args.delivery_channels
-              : ["in_app"]
-          ) as ("in_app" | "email")[];
+          console.log("[CRYZO_CREATE_RECIPE] args:", JSON.stringify(args));
 
-          const payload: Parameters<typeof convex.mutation<typeof api.autonomous.createTask>>[1] = {
+          const cronError = validateCron(args.cron);
+          if (cronError) {
+            return { success: false, error: `Invalid cron expression "${args.cron}": ${cronError}` };
+          }
+
+          const nextRun = nextCronTickFromExpression(args.cron);
+          const nextRunAt = nextRun?.toISOString();
+
+          const payload = {
             userId,
-            title,
-            instruction,
-            integrationSlugs,
-            deliveryChannels,
+            title: args.title,
+            instruction: args.instruction,
+            ...(args.workflow_code ? { workflowCode: args.workflow_code } : {}),
+            integrationSlugs: args.integration_slugs,
+            deliveryChannels: (args.delivery_channels ?? ["in_app"]) as ("in_app" | "email")[],
             goals: ["Execute the recurring workflow on schedule"],
             successCriteria: ["Workflow completes without errors"],
-            workflowType: "general_recurring_task",
+            workflowType: "general_recurring_task" as const,
             autonomyMode: "full_auto" as const,
             triggerType: "schedule" as const,
             schedule: {
               cadence: "custom" as const,
               cron: args.cron,
               cronHuman: args.cron_human,
-              timezone: args.timezone || "UTC",
+              timezone: args.timezone ?? "UTC",
+              ...(nextRunAt ? { nextRunAt } : {}),
             },
             recipeMetadata: {
               compiler: "cryzo_chat",
@@ -84,86 +77,78 @@ After creating, call CRYZO_SCHEDULE_RECIPE to activate the schedule.`,
             },
           };
 
-          if (typeof args.workflow_code === "string" && args.workflow_code.trim()) {
-            payload.workflowCode = args.workflow_code;
-          }
-
           const result = await convex.mutation(api.autonomous.createTask, payload);
 
           return {
             success: true,
             recipe_id: result.taskId,
-            message: `Recipe "${title}" created. Schedule: ${args.cron_human}. Now call CRYZO_SCHEDULE_RECIPE with recipe_id "${result.taskId}" to activate it.`,
+            next_run: nextRunAt ?? "unknown",
+            message: `Recipe "${args.title}" created and scheduled! Schedule: ${args.cron_human}. Next run: ${nextRunAt ?? "pending"}.`,
           };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
-          console.error("[CRYZO_CREATE_RECIPE] Failed:", msg, { args });
-          return {
-            success: false,
-            error: msg,
-          };
+          console.error("[CRYZO_CREATE_RECIPE] Failed:", msg);
+          return { success: false, error: msg };
         }
       },
-    },
+    }),
 
-    CRYZO_SCHEDULE_RECIPE: {
+    CRYZO_SCHEDULE_RECIPE: defineTool({
       description: "Activate, pause, or update the schedule for an existing task recipe.",
-      parameters: {
-        type: "object" as const,
-        properties: {
-          recipe_id: { type: "string", description: "The recipe ID returned by CRYZO_CREATE_RECIPE" },
-          status: { type: "string", enum: ["active", "paused"], description: "'active' to enable, 'paused' to disable" },
-          cron: { type: "string", description: "New cron expression if updating the schedule" },
-          cron_human: { type: "string", description: "Human-readable cron if updating the schedule" },
-        },
-        required: ["recipe_id", "status"],
-      },
-      execute: async (args: {
-        recipe_id: string;
-        status: "active" | "paused";
-        cron?: string;
-        cron_human?: string;
-      }) => {
+      parameters: z.object({
+        recipe_id: z.string().describe("The recipe ID returned by CRYZO_CREATE_RECIPE or CRYZO_LIST_RECIPES"),
+        status: z.enum(["active", "paused"]).describe("'active' to enable, 'paused' to disable"),
+        cron: z.string().optional().describe("New 5-field cron expression (UTC) if updating the schedule"),
+        cron_human: z.string().optional().describe("Human-readable schedule description"),
+      }),
+      execute: async (args) => {
         try {
+          console.log("[CRYZO_SCHEDULE_RECIPE] args:", JSON.stringify(args));
+
+          const taskId = args.recipe_id as Id<"autonomousTasks">;
+
           await convex.mutation(api.autonomous.updateTaskStatus, {
-            taskId: args.recipe_id as Id<"autonomousTasks">,
+            taskId,
             status: args.status,
           });
 
-          if (args.cron && args.cron_human) {
+          if (args.cron) {
+            const cronError = validateCron(args.cron);
+            if (cronError) {
+              return { success: false, error: `Invalid cron: ${cronError}. Status was updated to ${args.status}.` };
+            }
+
+            const nextRun = nextCronTickFromExpression(args.cron);
+
             await convex.mutation(api.autonomous.updateTaskDefinition, {
-              taskId: args.recipe_id as Id<"autonomousTasks">,
+              taskId,
               schedule: {
                 cadence: "custom" as const,
                 cron: args.cron,
-                cronHuman: args.cron_human,
+                cronHuman: args.cron_human ?? args.cron,
+                ...(nextRun ? { nextRunAt: nextRun.toISOString() } : {}),
               },
             });
           }
 
           return {
             success: true,
-            message: `Recipe ${args.status === "active" ? "activated ✅" : "paused ⏸️"}${args.cron ? ` — new schedule: ${args.cron_human}` : ""}`,
+            message: `Recipe ${args.status === "active" ? "activated ✅" : "paused ⏸️"}${args.cron ? ` — schedule: ${args.cron_human ?? args.cron}` : ""}`,
           };
         } catch (error) {
-          return {
-            success: false,
-            error: error instanceof Error ? error.message : "Failed to update recipe",
-          };
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error("[CRYZO_SCHEDULE_RECIPE] Failed:", msg);
+          return { success: false, error: msg };
         }
       },
-    },
+    }),
 
-    CRYZO_RUN_RECIPE: {
+    CRYZO_RUN_RECIPE: defineTool({
       description: "Trigger an immediate one-off execution of a saved recipe (for testing).",
-      parameters: {
-        type: "object" as const,
-        properties: {
-          recipe_id: { type: "string", description: "The recipe ID to run immediately" },
-        },
-        required: ["recipe_id"],
-      },
-      execute: async (args: { recipe_id: string }) => {
+      parameters: z.object({
+        recipe_id: z.string().describe("The recipe ID to run immediately"),
+      }),
+      execute: async (args) => {
         try {
           const baseUrl =
             process.env.NEXT_PUBLIC_APP_URL ||
@@ -180,10 +165,7 @@ After creating, call CRYZO_SCHEDULE_RECIPE to activate the schedule.`,
           const result = await response.json();
 
           if (!response.ok) {
-            return {
-              success: false,
-              error: result.error ?? "Dispatch failed",
-            };
+            return { success: false, error: result.error ?? "Dispatch failed" };
           }
 
           return {
@@ -198,22 +180,14 @@ After creating, call CRYZO_SCHEDULE_RECIPE to activate the schedule.`,
           };
         }
       },
-    },
+    }),
 
-    CRYZO_LIST_RECIPES: {
+    CRYZO_LIST_RECIPES: defineTool({
       description: "List all saved task recipes for the current user.",
-      parameters: {
-        type: "object" as const,
-        properties: {
-          status: {
-            type: "string",
-            enum: ["active", "paused", "archived"],
-            description: "Filter by status (omit for all)",
-          },
-        },
-        required: [],
-      },
-      execute: async (args: { status?: "active" | "paused" | "archived" }) => {
+      parameters: z.object({
+        status: z.enum(["active", "paused", "archived"]).optional().describe("Filter by status (omit for all)"),
+      }),
+      execute: async (args) => {
         try {
           const tasks = await convex.query(api.autonomous.listTasks, {
             userId,
@@ -239,6 +213,6 @@ After creating, call CRYZO_SCHEDULE_RECIPE to activate the schedule.`,
           };
         }
       },
-    },
+    }),
   };
 }

@@ -325,12 +325,12 @@ export function AnalyticsView({ toolkits, userId }: AnalyticsViewProps) {
   }, [platformKey]);
 
   const fetchAnalytics = useCallback(
-    async (force = false) => {
+    async () => {
       if (!platformKey || !userId) return;
 
       const cacheKey = `${platformKey}-${dateRange}`;
       const cached = cacheRef.current[cacheKey];
-      if (!force && cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+      if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
         setLiveMetrics(cached.metrics);
         setUsingMock(false);
         setFetchState("done");
@@ -339,15 +339,27 @@ export function AnalyticsView({ toolkits, userId }: AnalyticsViewProps) {
 
       setFetchState("loading");
       setFetchError(null);
-      setUsingMock(false);
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 25_000);
 
       try {
         const res = await fetch(
           `/api/analytics/${platformKey}?userId=${encodeURIComponent(userId)}&days=${dateRange}`,
+          { signal: controller.signal },
         );
-        const data = await res.json();
+        clearTimeout(timeout);
+
+        let data: any;
+        try {
+          data = await res.json();
+        } catch {
+          throw new Error(`Server returned non-JSON response (HTTP ${res.status})`);
+        }
 
         if (!res.ok || !data.metrics || data.metrics.length === 0) {
+          const errMsg = data?.error || `No metrics returned (HTTP ${res.status})`;
+          setFetchError(errMsg);
           setLiveMetrics(null);
           setUsingMock(true);
           setFetchState("done");
@@ -357,10 +369,15 @@ export function AnalyticsView({ toolkits, userId }: AnalyticsViewProps) {
         const converted = apiToDisplayMetrics(data.metrics);
         cacheRef.current[cacheKey] = { metrics: converted, ts: Date.now() };
         setLiveMetrics(converted);
+        setUsingMock(false);
         setFetchState("done");
       } catch (err) {
-        console.error("Analytics fetch failed:", err);
-        setFetchError(err instanceof Error ? err.message : "Fetch failed");
+        clearTimeout(timeout);
+        const msg = err instanceof DOMException && err.name === "AbortError"
+          ? "Request timed out (25s). The platform API may be slow."
+          : err instanceof Error ? err.message : "Fetch failed";
+        console.error("Analytics fetch failed:", msg);
+        setFetchError(msg);
         setLiveMetrics(null);
         setUsingMock(true);
         setFetchState("error");
@@ -369,17 +386,16 @@ export function AnalyticsView({ toolkits, userId }: AnalyticsViewProps) {
     [platformKey, userId, dateRange],
   );
 
+  /* Reset live metrics when switching platform (show mock immediately) */
   useEffect(() => {
-    if (platformKey && userId) {
-      fetchAnalytics();
-    } else {
-      setLiveMetrics(null);
-      setUsingMock(true);
-      setFetchState("idle");
-    }
-  }, [platformKey, userId, dateRange, fetchAnalytics]);
+    setLiveMetrics(null);
+    setUsingMock(true);
+    setFetchState("idle");
+    setFetchError(null);
+  }, [platformKey, dateRange]);
 
-  const metrics = liveMetrics ?? (usingMock || fetchState === "idle" ? mockMetrics : []);
+  const metrics = liveMetrics ?? mockMetrics;
+  const isLoading = fetchState === "loading";
 
   if (!connectedToolkits.length) {
     return (
@@ -502,21 +518,8 @@ export function AnalyticsView({ toolkits, userId }: AnalyticsViewProps) {
             <DateSelector value={dateRange} onChange={setDateRange} />
           </div>
 
-          {/* Loading state */}
-          {fetchState === "loading" && (
-            <div className="flex items-center justify-center py-20">
-              <div className="flex flex-col items-center gap-3">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-200 border-t-black" />
-                <p className="text-sm text-neutral-500">
-                  Fetching {currentPlatform?.name} analytics via Composio...
-                </p>
-                <p className="text-xs text-neutral-400">This may take a few seconds</p>
-              </div>
-            </div>
-          )}
-
           {/* Analytics Grid (Postiz layout) */}
-          {fetchState !== "loading" && metrics.length > 0 ? (
+          {metrics.length > 0 ? (
             <>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {metrics.map((metric, i) => (
@@ -524,40 +527,47 @@ export function AnalyticsView({ toolkits, userId }: AnalyticsViewProps) {
                 ))}
               </div>
 
-              {usingMock && (
-                <div className="mt-6 flex items-center justify-between rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3">
-                  <div>
-                    <p className="text-xs font-medium text-amber-700">
-                      Showing sample data{fetchError ? ` — ${fetchError}` : ""}
-                    </p>
-                    <p className="text-xs text-amber-600">
-                      Live analytics will load when the platform API responds.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => fetchAnalytics(true)}
-                    className="shrink-0 rounded-md bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-200 transition-colors"
-                  >
-                    Retry
-                  </button>
+              {/* Status bar */}
+              {isLoading ? (
+                <div className="mt-6 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+                  <p className="text-xs text-blue-700">
+                    Fetching live data from {currentPlatform?.name} via Composio… this may take up to 25 seconds.
+                  </p>
                 </div>
-              )}
-
-              {!usingMock && liveMetrics && (
+              ) : !usingMock && liveMetrics ? (
                 <div className="mt-6 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
                   <p className="text-xs text-emerald-700">
                     Live data from {currentPlatform?.name} via Composio
                   </p>
                   <button
-                    onClick={() => fetchAnalytics(true)}
+                    onClick={fetchAnalytics}
                     className="shrink-0 rounded-md bg-emerald-100 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-200 transition-colors"
                   >
                     Refresh
                   </button>
                 </div>
+              ) : (
+                <div className="mt-6 flex items-center justify-between rounded-lg border border-dashed border-neutral-300 bg-neutral-50 px-4 py-3">
+                  <div>
+                    <p className="text-xs font-medium text-neutral-600">
+                      Showing sample data{fetchError ? " — last fetch: " + fetchError : ""}
+                    </p>
+                    <p className="text-xs text-neutral-400">
+                      Click "Fetch Live Data" to pull real metrics from the connected platform.
+                    </p>
+                  </div>
+                  <button
+                    onClick={fetchAnalytics}
+                    disabled={isLoading}
+                    className="shrink-0 rounded-md bg-black px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 disabled:opacity-50 transition-colors"
+                  >
+                    Fetch Live Data
+                  </button>
+                </div>
               )}
             </>
-          ) : fetchState !== "loading" ? (
+          ) : !isLoading ? (
             <div className="flex flex-col items-center justify-center rounded-xl border border-neutral-200 bg-white py-16">
               <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-neutral-100">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-neutral-400">
