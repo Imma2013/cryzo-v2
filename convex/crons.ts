@@ -1,14 +1,5 @@
 import { cronJobs } from "convex/server";
 
-import { internal } from "./_generated/api";
-
-const crons = cronJobs();
-
-crons.interval(
-  "autonomous-dispatch-cycle",
-  { minutes: 1 },
-  internal.autonomousRuntime.dispatchScheduledRuns,
-  {},
-);
-
-export default crons;
+// Scheduled recipe execution is driven by Vercel cron via /api/cron.
+// Keep Convex cron registration empty so deploys do not reference removed jobs.
+export default cronJobs();

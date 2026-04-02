@@ -10,8 +10,7 @@ import {
 } from "ai";
 import { api as convexApi } from "../../../convex/_generated/api";
 import { getAiModel, getAiModelName } from "../../../lib/ai-model";
-import { getCryzoSystemPrompt } from "../../../lib/cryzo-system-prompt";
-import { getCryzoCustomTools } from "../../../lib/cryzo-custom-tools";
+import { getRecipeTools } from "../../../lib/recipe-tools";
 
 const TOOLKITS = [
   "gmail",
@@ -75,13 +74,14 @@ export async function POST(req: Request) {
     userId || "pg-test-pg-test-43d08743-c471-4d27-ac73-9b9398880252",
   );
   const composioTools = await session.tools();
-  const customTools = getCryzoCustomTools(convex, userId || "pg-test-pg-test-43d08743-c471-4d27-ac73-9b9398880252");
-  const tools = { ...composioTools, ...customTools } as typeof composioTools;
+  const recipeTools = getRecipeTools(userId || "pg-test-pg-test-43d08743-c471-4d27-ac73-9b9398880252");
+  const allTools = { ...composioTools, ...recipeTools };
+
   const result = streamText({
     model: getAiModel(),
-    system: getCryzoSystemPrompt(userId),
+    system: `You are Cryzo, an intelligent AI agent. Help the user accomplish tasks using their connected apps. Today's date is ${new Date().toLocaleDateString()}. You can create scheduled recurring recipes using RECIPE_CREATE when the user wants something automated on a schedule (e.g., "send me unread emails every morning").`,
     messages: await convertToModelMessages(messages),
-    tools,
+    tools: allTools,
     stopWhen: stepCountIs(25),
   });
   return result.toUIMessageStreamResponse({

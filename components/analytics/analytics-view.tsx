@@ -1,7 +1,13 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import type { ToolkitConnection } from "../autonomous/autonomous-types";
+type ToolkitConnection = {
+  slug: string;
+  name: string;
+  logo?: string;
+  isConnected: boolean;
+  connectedAccountId?: string;
+};
 
 /* ─── Allowed social platforms (same as Postiz) ──────────────── */
 const SOCIAL_PLATFORMS = [

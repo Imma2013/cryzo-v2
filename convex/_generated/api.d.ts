@@ -8,13 +8,10 @@
  * @module
  */
 
-import type * as autonomous from "../autonomous.js";
-import type * as autonomousActions from "../autonomousActions.js";
-import type * as autonomousRuntime from "../autonomousRuntime.js";
-import type * as autonomySchema from "../autonomySchema.js";
 import type * as billing from "../billing.js";
 import type * as chats from "../chats.js";
 import type * as crons from "../crons.js";
+import type * as recipes from "../recipes.js";
 
 import type {
   ApiFromModules,
@@ -23,13 +20,10 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  autonomous: typeof autonomous;
-  autonomousActions: typeof autonomousActions;
-  autonomousRuntime: typeof autonomousRuntime;
-  autonomySchema: typeof autonomySchema;
   billing: typeof billing;
   chats: typeof chats;
   crons: typeof crons;
+  recipes: typeof recipes;
 }>;
 
 /**

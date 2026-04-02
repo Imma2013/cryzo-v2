@@ -193,17 +193,6 @@ export const recordUsage = mutation({
   args: {
     userId: v.string(),
     model: v.optional(v.string()),
-    taskId: v.optional(v.id("autonomousTasks")),
-    runId: v.optional(v.id("autonomousRuns")),
-    workflowType: v.optional(v.string()),
-    triggerSource: v.optional(
-      v.union(
-        v.literal("manual"),
-        v.literal("scheduler"),
-        v.literal("event"),
-        v.literal("retry"),
-      ),
-    ),
     inputTokens: v.number(),
     outputTokens: v.number(),
     totalTokens: v.number(),
@@ -218,10 +207,6 @@ export const recordUsage = mutation({
       userId: args.userId,
       plan: profile.plan,
       model: args.model,
-      taskId: args.taskId,
-      runId: args.runId,
-      workflowType: args.workflowType,
-      triggerSource: args.triggerSource,
       inputTokens: args.inputTokens,
       outputTokens: args.outputTokens,
       totalTokens: args.totalTokens,
@@ -237,22 +222,6 @@ export const recordUsage = mutation({
     });
 
     return { success: true };
-  },
-});
-
-export const listUsageForTask = query({
-  args: {
-    taskId: v.id("autonomousTasks"),
-    limit: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    const events = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_task_created", (q) => q.eq("taskId", args.taskId))
-      .order("desc")
-      .take(args.limit ?? 10);
-
-    return events;
   },
 });
 
