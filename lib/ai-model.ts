@@ -1,9 +1,9 @@
-import { google } from "@ai-sdk/google";
+import { anthropic } from "@ai-sdk/anthropic";
 
-const DEFAULT_MODEL = "gemini-3.1-pro-preview";
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 export function getAiModel() {
-  return google(process.env.AI_MODEL || DEFAULT_MODEL);
+  return anthropic(process.env.AI_MODEL || DEFAULT_MODEL);
 }
 
 export function getAiModelName() {

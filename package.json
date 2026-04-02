@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.66",
     "@ai-sdk/google": "^3.0.55",
     "@ai-sdk/openai": "latest",
     "@ai-sdk/react": "latest",
