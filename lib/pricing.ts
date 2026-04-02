@@ -1,5 +1,11 @@
 export type PlanId = "free" | "pro" | "business" | "enterprise";
 
+declare const process:
+  | {
+      env?: Record<string, string | undefined>;
+    }
+  | undefined;
+
 export const LEGACY_TOKENS_PER_CREDIT = 7_500;
 export const TOKENS_PER_CREDIT = 500;
 
@@ -93,15 +99,17 @@ export function getCurrentBillingWindow(now = new Date()) {
 }
 
 export function getPlanFromPriceId(priceId?: string | null): PlanId | null {
+  const env = process?.env ?? {};
+
   if (!priceId) {
     return null;
   }
 
-  if (priceId === process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY) {
+  if (priceId === env.NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY) {
     return "pro";
   }
 
-  if (priceId === process.env.NEXT_PUBLIC_STRIPE_PRICE_BUSINESS_MONTHLY) {
+  if (priceId === env.NEXT_PUBLIC_STRIPE_PRICE_BUSINESS_MONTHLY) {
     return "business";
   }
 

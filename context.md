@@ -154,3 +154,7 @@ Key files already identified:
 - Local testing is the current priority.
 - Production-grade migration to Convex/Firebase comes after the local UX is correct.
 - Avoid repeating earlier mistakes: ask before changing behavior that is not explicitly requested.
+- Autonomy runtime assumptions and current Convex contract are documented in `frontend/handoff-autonomy.md` for scheduler, memory, approval, and full-auto follow-on work.
+- Full-auto autonomous task UX and executor safety assumptions are documented in `frontend/handoff-autonomy-full-auto.md`.
+- Deploy-time cron secret, kill-switch, and observability expectations are documented in `frontend/handoff-autonomy-deploy.md`.
+- Operator visibility gaps and the proposed next autonomy control surface are documented in `frontend/handoff-autonomy-ops-surface.md`.

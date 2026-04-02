@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import type { AppView } from "../autonomous/autonomous-types";
 import type { ChatSummary } from "../../hooks/use-chat-history";
 
 type ChatSidebarProps = {
-  activeView: "chat" | "apps" | "billing";
-  onSelectView: (view: "chat" | "apps" | "billing") => void;
+  activeView: AppView;
+  onSelectView: (view: AppView) => void;
   chats: ChatSummary[];
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
@@ -64,8 +65,36 @@ export function ChatSidebar({
 
       <div className="border-b border-neutral-200 px-2 py-2">
         <button
-          onClick={() => onSelectView("apps")}
+          onClick={() => onSelectView("autonomous")}
           className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
+            activeView === "autonomous"
+              ? "bg-neutral-100 text-black"
+              : "text-neutral-500 hover:bg-neutral-50 hover:text-black"
+          }`}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 8V4H8" />
+            <rect x="4" y="8" width="16" height="12" rx="2" />
+            <path d="M2 14h2" />
+            <path d="M20 14h2" />
+            <path d="M15 13v2" />
+            <path d="M9 13v2" />
+          </svg>
+          <span>Tasks</span>
+        </button>
+        <button
+          onClick={() => onSelectView("apps")}
+          className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
             activeView === "apps"
               ? "bg-neutral-100 text-black"
               : "text-neutral-500 hover:bg-neutral-50 hover:text-black"

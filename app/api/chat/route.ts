@@ -1,4 +1,3 @@
-import { openai } from "@ai-sdk/openai";
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import { ConvexHttpClient } from "convex/browser";
@@ -10,6 +9,8 @@ import {
   type UIMessage,
 } from "ai";
 import { api as convexApi } from "../../../convex/_generated/api";
+import { getAiModel, getAiModelName } from "../../../lib/ai-model";
+import { getCryzoSystemPrompt } from "../../../lib/cryzo-system-prompt";
 
 const TOOLKITS = [
   "gmail",
@@ -74,11 +75,11 @@ export async function POST(req: Request) {
   );
   const tools = await session.tools();
   const result = streamText({
-    model: openai("gpt-5.4"),
-    system: "You are a helpful assistant. Use Composio tools to help the user.",
+    model: getAiModel(),
+    system: getCryzoSystemPrompt(userId),
     messages: await convertToModelMessages(messages),
     tools,
-    stopWhen: stepCountIs(10),
+    stopWhen: stepCountIs(25),
   });
   return result.toUIMessageStreamResponse({
     originalMessages: messages,
@@ -104,7 +105,7 @@ export async function POST(req: Request) {
 
         await convex.mutation(convexApi.billing.recordUsage, {
           userId,
-          model: "gpt-5.4",
+          model: getAiModelName(),
           inputTokens,
           outputTokens,
           totalTokens,
