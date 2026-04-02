@@ -1,10 +1,10 @@
-import { openai } from "@ai-sdk/openai";
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import { ConvexHttpClient } from "convex/browser";
 import { generateText, stepCountIs } from "ai";
 
 import { api as convexApi } from "../../../../convex/_generated/api";
+import { getAiModel, getAiModelName } from "../../../../lib/ai-model";
 import {
   buildSystemPrompt,
   claimNextDueRun,
@@ -247,7 +247,7 @@ async function handleDispatch(req: Request) {
     try {
       const tools = await session.tools();
       const result = await generateText({
-        model: openai("gpt-5.4"),
+        model: getAiModel(),
         system: buildSystemPrompt({
           context,
           integrationSlugs: effectiveIntegrationSlugs,
@@ -303,7 +303,7 @@ async function handleDispatch(req: Request) {
       if ((usage.totalTokens ?? 0) > 0) {
         await convex.mutation(convexApi.billing.recordUsage, {
           userId: context.task.userId,
-          model: "gpt-5.4",
+          model: getAiModelName(),
           inputTokens: usage.inputTokens ?? 0,
           outputTokens: usage.outputTokens ?? 0,
           totalTokens: usage.totalTokens ?? 0,

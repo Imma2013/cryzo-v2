@@ -147,17 +147,31 @@ After creating, call CRYZO_SCHEDULE_RECIPE to activate the schedule.`,
       },
       execute: async (args: { recipe_id: string }) => {
         try {
-          const result = await convex.action(api.autonomousActions.runTaskNow, {
-            taskId: args.recipe_id as Id<"autonomousTasks">,
-            userId,
+          const baseUrl =
+            process.env.NEXT_PUBLIC_APP_URL ||
+            (process.env.VERCEL_URL
+              ? `https://${process.env.VERCEL_URL}`
+              : "http://localhost:3000");
+
+          const response = await fetch(`${baseUrl}/api/autonomous/run-now`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ taskId: args.recipe_id, userId }),
           });
 
+          const result = await response.json();
+
+          if (!response.ok) {
+            return {
+              success: false,
+              error: result.error ?? "Dispatch failed",
+            };
+          }
+
           return {
-            success: result.success,
+            success: true,
             run_id: result.runId,
-            message: result.dispatchStarted
-              ? "Recipe is running now ✅"
-              : `Queued but dispatch failed: ${result.dispatchError}`,
+            message: "Recipe is running now ✅",
           };
         } catch (error) {
           return {

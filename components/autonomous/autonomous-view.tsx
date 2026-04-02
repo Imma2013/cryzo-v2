@@ -1,24 +1,22 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import {
-  Calendar as CalendarIcon,
+  AlertTriangle,
+  ArrowLeft,
   CheckCircle,
   Clock,
-  Edit,
-  LayoutGrid,
-  List,
+  Compass,
   Pause,
   Play,
   Plus,
-  Rocket,
-  ScrollText,
+  Search,
+  Zap,
 } from "lucide-react";
 
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatRunTime } from "@/lib/autonomy-run-history";
 import {
@@ -27,6 +25,123 @@ import {
 } from "@/lib/autonomy-intent";
 import type { ToolkitConnection } from "./autonomous-types";
 
+const CRON_PRESETS = [
+  { label: "Hourly", cadence: "hourly" as const, timeOfDay: "" },
+  { label: "Daily 8 AM", cadence: "daily" as const, timeOfDay: "08:00" },
+  { label: "Daily 9 AM", cadence: "daily" as const, timeOfDay: "09:00" },
+  { label: "Daily 5 PM", cadence: "daily" as const, timeOfDay: "17:00" },
+  { label: "Weekly Mon", cadence: "weekly" as const, timeOfDay: "09:00" },
+  { label: "Custom", cadence: "daily" as const, timeOfDay: "" },
+];
+
+const DISCOVER_TEMPLATES = [
+  {
+    id: "daily-gmail-digest",
+    name: "Daily Gmail Digest",
+    description: "Summarise unread emails every morning and highlight anything urgent.",
+    integrations: ["gmail"],
+    cadence: "daily" as const,
+    timeOfDay: "08:00",
+    instruction: "Check my Gmail inbox and send me a concise summary of unread emails, highlighting anything that needs my attention.",
+    category: "Email",
+  },
+  {
+    id: "weekly-github-pr",
+    name: "Weekly GitHub PR Summary",
+    description: "Get a rundown of open pull requests every Friday afternoon.",
+    integrations: ["github"],
+    cadence: "weekly" as const,
+    timeOfDay: "17:00",
+    instruction: "List all open pull requests in my GitHub repos, summarise what each one does and flag any that have been open more than 3 days.",
+    category: "Engineering",
+  },
+  {
+    id: "daily-calendar-briefing",
+    name: "Morning Calendar Briefing",
+    description: "A daily briefing of your Google Calendar meetings before you start.",
+    integrations: ["googlecalendar"],
+    cadence: "daily" as const,
+    timeOfDay: "07:30",
+    instruction: "Fetch my Google Calendar events for today and give me a concise briefing: meeting times, attendees, and any prep I should do.",
+    category: "Calendar",
+  },
+  {
+    id: "daily-slack-digest",
+    name: "Daily Slack Digest",
+    description: "Catch up on unread Slack messages each morning.",
+    integrations: ["slack"],
+    cadence: "daily" as const,
+    timeOfDay: "08:30",
+    instruction: "Summarise my unread Slack messages from the past 24 hours, grouped by channel, and flag any @mentions.",
+    category: "Messaging",
+  },
+  {
+    id: "weekly-notion-update",
+    name: "Weekly Notion Pages Update",
+    description: "Review and update your Notion docs every Monday morning.",
+    integrations: ["notion"],
+    cadence: "weekly" as const,
+    timeOfDay: "09:00",
+    instruction: "Check my Notion workspace for pages updated in the last 7 days and give me a summary of what changed.",
+    category: "Productivity",
+  },
+  {
+    id: "daily-twitter-digest",
+    name: "Daily X / Twitter Digest",
+    description: "Summarise your Twitter timeline and mentions every morning.",
+    integrations: ["twitter"],
+    cadence: "daily" as const,
+    timeOfDay: "08:00",
+    instruction: "Fetch my Twitter/X timeline from the past 24 hours and give me a digest of the most interesting posts and any mentions.",
+    category: "Social",
+  },
+  {
+    id: "weekly-google-sheets-report",
+    name: "Weekly Analytics Report",
+    description: "Auto-fill a Google Sheet with weekly metrics every Monday.",
+    integrations: ["googlesheets"],
+    cadence: "weekly" as const,
+    timeOfDay: "09:00",
+    instruction: "Pull key metrics from my connected analytics sources and append a new row to my Google Sheet weekly report tracker.",
+    category: "Analytics",
+  },
+  {
+    id: "daily-reddit-digest",
+    name: "Daily Reddit Digest",
+    description: "Get the top posts from your subreddits each morning.",
+    integrations: ["reddit"],
+    cadence: "daily" as const,
+    timeOfDay: "08:00",
+    instruction: "Fetch the top 5 posts from my saved subreddits from the last 24 hours and give me a concise digest.",
+    category: "Social",
+  },
+];
+
+const SLUG_COLORS: Record<string, string> = {
+  gmail: "bg-red-100 text-red-700",
+  googlecalendar: "bg-blue-100 text-blue-700",
+  googlesheets: "bg-green-100 text-green-700",
+  googledrive: "bg-yellow-100 text-yellow-700",
+  googledocs: "bg-blue-100 text-blue-600",
+  slack: "bg-purple-100 text-purple-700",
+  notion: "bg-neutral-200 text-neutral-700",
+  twitter: "bg-sky-100 text-sky-700",
+  reddit: "bg-orange-100 text-orange-700",
+  github: "bg-neutral-200 text-neutral-800",
+  linear: "bg-violet-100 text-violet-700",
+  youtube: "bg-red-100 text-red-600",
+};
+
+function SlugIcon({ slug }: { slug: string }) {
+  const color = SLUG_COLORS[slug.toLowerCase()] ?? "bg-neutral-100 text-neutral-600";
+  const label = slug.slice(0, 2).toUpperCase();
+  return (
+    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] font-bold ${color}`}>
+      {label}
+    </span>
+  );
+}
+
 type AutonomousViewProps = {
   userId: string | null;
   toolkits: ToolkitConnection[];
@@ -34,78 +149,54 @@ type AutonomousViewProps = {
 };
 
 type TaskCadence = "hourly" | "daily" | "weekly";
-type TaskStatus = "active" | "paused" | "archived";
-type ViewMode = "board" | "list";
 
 type TaskRecord = NonNullable<ReturnType<typeof useQuery<typeof api.autonomous.listTasks>>>;
 type TaskItem = TaskRecord extends Array<infer T> ? T : never;
 
-function statusColumnLabel(status: TaskStatus) {
-  switch (status) {
-    case "active":
-      return "ACTIVE";
-    case "paused":
-      return "PAUSED";
-    default:
-      return "ARCHIVED";
-  }
-}
-
 function splitLines(value: string) {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  return value.split("\n").map((l) => l.trim()).filter(Boolean);
 }
 
 function taskSortValue(task: TaskItem) {
-  return (
-    task.schedule?.nextRunAt ??
-    task._creationTime?.toString?.() ??
-    task.createdAt ??
-    new Date().toISOString()
-  );
+  return task.schedule?.nextRunAt ?? task._creationTime?.toString?.() ?? task.createdAt ?? new Date().toISOString();
 }
 
-function formatSchedule(task: TaskItem) {
-  return task.schedule?.cronHuman ?? "Manual";
-}
-
-function StatusBadge({ status }: { status: TaskStatus }) {
-  const tone =
-    status === "active"
-      ? "bg-green-100 text-green-700"
-      : status === "paused"
-        ? "bg-neutral-100 text-neutral-700"
-        : "bg-neutral-200 text-neutral-700";
-
+function ActiveBadge({ status }: { status: string }) {
+  if (status === "active") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700 ring-1 ring-green-200">
+        <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+        Active
+      </span>
+    );
+  }
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${tone}`}>
-      {status}
+    <span className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-500">
+      <span className="h-1.5 w-1.5 rounded-full bg-neutral-400" />
+      {status.charAt(0).toUpperCase() + status.slice(1)}
     </span>
   );
 }
 
-export function AutonomousView({
-  userId,
-  toolkits,
-  onConnect,
-}: AutonomousViewProps) {
+export function AutonomousView({ userId, toolkits, onConnect }: AutonomousViewProps) {
   const tasks = useQuery(api.autonomous.listTasks, userId ? { userId } : "skip");
-  const recentEvents = useQuery(
-    api.autonomous.listRecentEvents,
-    userId ? { userId, limit: 30 } : "skip",
-  );
 
   const createTask = useMutation(api.autonomous.createTask);
   const updateTaskDefinition = useMutation(api.autonomous.updateTaskDefinition);
   const updateTaskStatus = useMutation(api.autonomous.updateTaskStatus);
-  const runTaskNow = useAction(api.autonomousActions.runTaskNow);
 
-  const [view, setView] = useState<ViewMode>("board");
-  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null);
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<"overview" | "runs">("overview");
+  const [listTab, setListTab] = useState<"tasks" | "discover">("tasks");
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  const taskRuns = useQuery(
+    api.autonomous.listRunsByTask,
+    detailTaskId ? { taskId: detailTaskId as never, limit: 20 } : "skip",
+  );
 
   const [title, setTitle] = useState("");
   const [instruction, setInstruction] = useState("");
@@ -113,64 +204,73 @@ export function AutonomousView({
   const [timeOfDay, setTimeOfDay] = useState("09:00");
 
   const sortedTasks = useMemo(() => {
-    return [...(tasks ?? [])].sort((left, right) =>
-      taskSortValue(left).localeCompare(taskSortValue(right)),
-    );
+    return [...(tasks ?? [])].sort((a, b) => taskSortValue(a).localeCompare(taskSortValue(b)));
   }, [tasks]);
 
-  const tasksByStatus = useMemo(() => {
-    return {
-      active: sortedTasks.filter((task) => task.status === "active"),
-      paused: sortedTasks.filter((task) => task.status === "paused"),
-      archived: sortedTasks.filter((task) => task.status === "archived"),
-    } satisfies Record<TaskStatus, TaskItem[]>;
-  }, [sortedTasks]);
+  const filteredTasks = useMemo(() => {
+    if (!search.trim()) return sortedTasks;
+    const q = search.toLowerCase();
+    return sortedTasks.filter((t) => t.title.toLowerCase().includes(q) || t.instruction.toLowerCase().includes(q));
+  }, [sortedTasks, search]);
 
-  const upcomingTasks = useMemo(() => {
-    return sortedTasks
-      .filter((task) => task.status !== "archived")
-      .slice(0, 5);
-  }, [sortedTasks]);
+  const scheduledTasks = useMemo(() => filteredTasks.filter((t) => t.status === "active" && t.schedule?.cronHuman), [filteredTasks]);
+  const otherTasks = useMemo(() => filteredTasks.filter((t) => !(t.status === "active" && t.schedule?.cronHuman)), [filteredTasks]);
 
-  async function handleRunNow(taskId: string) {
-    if (!userId) {
-      return;
-    }
+  const detailTask = useMemo(() => tasks?.find((t) => t._id === detailTaskId) ?? null, [tasks, detailTaskId]);
+
+  async function handleRunNow(taskId: string, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    if (!userId) return;
     setRunningTaskId(taskId);
     try {
-      await runTaskNow({ taskId: taskId as never, userId });
+      await fetch("/api/autonomous/run-now", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, userId }),
+      });
     } finally {
       setRunningTaskId(null);
     }
   }
 
-  function openCreateTask() {
-    setSelectedTask(null);
+  function openCreate(template?: typeof DISCOVER_TEMPLATES[number]) {
+    setEditingTask(null);
+    if (template) {
+      setTitle(template.name);
+      setInstruction(template.instruction);
+      setCadence(template.cadence);
+      setTimeOfDay(template.timeOfDay);
+      setIsDialogOpen(true);
+      return;
+    }
     setTitle("");
     setInstruction("");
     setCadence("daily");
     setTimeOfDay("09:00");
-    setIsTaskDialogOpen(true);
+    setIsDialogOpen(true);
   }
 
-  function openEditTask(task: TaskItem) {
-    setSelectedTask(task);
+  function formatRunDuration(run: { startedAt?: string; completedAt?: string }) {
+    if (!run.startedAt || !run.completedAt) return "-";
+    const ms = new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime();
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${(ms / 60000).toFixed(1)}m`;
+  }
+
+  function openEdit(task: TaskItem, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    setEditingTask(task);
     setTitle(task.title);
     setInstruction(task.instruction);
-    setCadence(
-      task.schedule?.cadence === "hourly" || task.schedule?.cadence === "weekly"
-        ? task.schedule.cadence
-        : "daily",
-    );
+    setCadence(task.schedule?.cadence === "hourly" || task.schedule?.cadence === "weekly" ? task.schedule.cadence : "daily");
     setTimeOfDay(task.schedule?.timeOfDay ?? "09:00");
-    setIsTaskDialogOpen(true);
+    setIsDialogOpen(true);
   }
 
-  async function handleSubmitTask(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!userId || !title.trim() || !instruction.trim()) {
-      return;
-    }
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!userId || !title.trim() || !instruction.trim()) return;
 
     const schedule = {
       cadence,
@@ -181,29 +281,14 @@ export function AutonomousView({
       nextRunAt: new Date().toISOString(),
     };
 
-    if (selectedTask) {
-      await updateTaskDefinition({
-        taskId: selectedTask._id,
-        title: title.trim(),
-        instruction: instruction.trim(),
-        schedule,
-      });
+    if (editingTask) {
+      await updateTaskDefinition({ taskId: editingTask._id, title: title.trim(), instruction: instruction.trim(), schedule });
     } else {
       await createTask({
-        userId,
-        title: title.trim(),
-        instruction: instruction.trim(),
-        workflowCode: [`TASK: ${title.trim()}`, `INSTRUCTION: ${instruction.trim()}`].join("\n"),
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-        outputSchema: {
-          type: "object",
-          properties: {
-            summary: { type: "string" },
-          },
-        },
+        userId, title: title.trim(), instruction: instruction.trim(),
+        workflowCode: `TASK: ${title.trim()}\nINSTRUCTION: ${instruction.trim()}`,
+        inputSchema: { type: "object", properties: {} },
+        outputSchema: { type: "object", properties: { summary: { type: "string" } } },
         defaultInputData: {},
         integrationSlugs: [],
         deliveryChannels: ["in_app", "email"],
@@ -216,358 +301,473 @@ export function AutonomousView({
         schedule,
       });
     }
-
-    setIsTaskDialogOpen(false);
+    setIsDialogOpen(false);
   }
 
-  async function toggleTaskStatus(task: TaskItem) {
-    await updateTaskStatus({
-      taskId: task._id,
-      status: task.status === "active" ? "paused" : "active",
-    });
+  async function toggleStatus(task: TaskItem, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    await updateTaskStatus({ taskId: task._id, status: task.status === "active" ? "paused" : "active" });
   }
 
-  const disconnectedToolkits = toolkits.filter((toolkit) => !toolkit.isConnected);
+  if (detailTask) {
+    return (
+      <div className="flex-1 overflow-y-auto bg-white">
+        <div className="mx-auto max-w-2xl px-8 py-8">
+          <button
+            onClick={() => setDetailTaskId(null)}
+            className="mb-8 flex items-center gap-2 rounded-lg p-1.5 text-sm text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+
+          <h1 className="mb-8 text-3xl font-bold text-neutral-900">{detailTask.title}</h1>
+
+          <div className="mb-8 flex flex-col gap-4">
+            {detailTask.integrationSlugs && detailTask.integrationSlugs.length > 0 && (
+              <div className="flex items-center gap-6">
+                <span className="w-24 text-sm text-neutral-400">Apps</span>
+                <div className="flex items-center gap-2">
+                  {detailTask.integrationSlugs.map((slug) => (
+                    <SlugIcon key={slug} slug={slug} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-6">
+              <span className="w-24 text-sm text-neutral-400">Schedule</span>
+              <div className="flex items-center gap-2">
+                <ActiveBadge status={detailTask.status} />
+                {detailTask.schedule?.cronHuman ? (
+                  <span className="text-sm text-neutral-600">{detailTask.schedule.cronHuman}</span>
+                ) : (
+                  <span className="text-sm text-neutral-400">Manual only</span>
+                )}
+              </div>
+            </div>
+
+            {detailTask.schedule?.nextRunAt && detailTask.status === "active" && (
+              <div className="flex items-center gap-6">
+                <span className="w-24 text-sm text-neutral-400">Next run</span>
+                <span className="text-sm text-neutral-600">{formatRunTime(detailTask.schedule.nextRunAt)}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="mb-8 flex items-center gap-3">
+            <button
+              onClick={() => void handleRunNow(detailTask._id)}
+              disabled={runningTaskId === detailTask._id}
+              className="flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-80 disabled:opacity-50"
+            >
+              <Zap className="h-3.5 w-3.5" />
+              {runningTaskId === detailTask._id ? "Running…" : "Run"}
+            </button>
+            <button
+              onClick={(e) => void toggleStatus(detailTask, e)}
+              className="flex items-center gap-2 rounded-lg border border-neutral-200 px-4 py-2 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50"
+            >
+              {detailTask.status === "active" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              {detailTask.status === "active" ? "Pause" : "Resume"}
+            </button>
+            <button
+              onClick={(e) => openEdit(detailTask, e)}
+              className="flex items-center gap-2 rounded-lg border border-neutral-200 px-4 py-2 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50"
+            >
+              <Clock className="h-3.5 w-3.5" />
+              Edit Schedule
+            </button>
+          </div>
+
+          <div className="border-b border-neutral-200">
+            <div className="flex gap-6">
+              {(["overview", "runs"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setDetailTab(tab)}
+                  className={`pb-2 text-sm font-medium capitalize transition-colors ${
+                    detailTab === tab
+                      ? "border-b-2 border-black text-black"
+                      : "text-neutral-400 hover:text-neutral-700"
+                  }`}
+                >
+                  {tab === "runs" ? "Run History" : "Overview"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {detailTab === "overview" && (
+            <div className="py-6">
+              <p className="leading-relaxed text-neutral-600">{detailTask.instruction}</p>
+            </div>
+          )}
+
+          {detailTab === "runs" && (
+            <div className="py-4">
+              {!taskRuns || taskRuns.length === 0 ? (
+                <div className="flex flex-col items-center py-12 text-center">
+                  <Clock className="mb-2 h-8 w-8 text-neutral-300" />
+                  <p className="text-sm text-neutral-400">No runs yet. Hit Run to execute this task.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <div className="grid grid-cols-4 gap-4 px-3 pb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
+                    <span>Status</span><span>Triggered</span><span>Duration</span><span>Source</span>
+                  </div>
+                  {taskRuns.map((run) => (
+                    <div key={run._id} className="grid grid-cols-4 gap-4 rounded-lg px-3 py-2.5 text-sm hover:bg-neutral-50">
+                      <span className="flex items-center gap-1.5">
+                        {run.status === "succeeded" ? (
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                        ) : run.status === "failed" ? (
+                          <AlertTriangle className="h-4 w-4 text-red-500" />
+                        ) : run.status === "running" ? (
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                        ) : (
+                          <Clock className="h-4 w-4 text-neutral-400" />
+                        )}
+                        <span className={`capitalize ${
+                          run.status === "succeeded" ? "text-green-700" :
+                          run.status === "failed" ? "text-red-600" :
+                          run.status === "running" ? "text-blue-600" :
+                          "text-neutral-500"
+                        }`}>{run.status}</span>
+                      </span>
+                      <span className="text-neutral-500">{run.scheduledFor ? formatRunTime(run.scheduledFor) : formatRunTime(run.createdAt)}</span>
+                      <span className="text-neutral-500">{formatRunDuration(run)}</span>
+                      <span className="capitalize text-neutral-400">{run.triggerSource?.replace("_", " ") ?? "-"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {isDialogOpen && (
+          <TaskDialog
+            editing={editingTask}
+            title={title} setTitle={setTitle}
+            instruction={instruction} setInstruction={setInstruction}
+            cadence={cadence} setCadence={setCadence}
+            timeOfDay={timeOfDay} setTimeOfDay={setTimeOfDay}
+            onSubmit={handleSubmit}
+            onClose={() => setIsDialogOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold">Tasks</h2>
-          <div className="flex gap-2">
-            <Button onClick={openCreateTask} data-testid="new-task-btn">
-              <Plus className="mr-2 h-4 w-4" />
+    <div className="flex-1 overflow-y-auto bg-white">
+      <div className="mx-auto max-w-4xl px-8 py-8">
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-1 rounded-lg border border-neutral-200 p-1">
+            <button
+              onClick={() => setListTab("tasks")}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                listTab === "tasks" ? "bg-black text-white" : "text-neutral-500 hover:text-neutral-800"
+              }`}
+            >
+              Tasks
+            </button>
+            <button
+              onClick={() => setListTab("discover")}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                listTab === "discover" ? "bg-black text-white" : "text-neutral-500 hover:text-neutral-800"
+              }`}
+            >
+              <Compass className="h-3.5 w-3.5" />
+              Discover
+            </button>
+          </div>
+          <div className="flex items-center gap-3">
+            {listTab === "tasks" && (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search tasks…"
+                  className="h-9 w-48 rounded-lg border border-neutral-200 bg-neutral-50 pl-9 pr-3 text-sm outline-none focus:border-neutral-400 focus:bg-white"
+                />
+              </div>
+            )}
+            <button
+              onClick={() => openCreate()}
+              data-testid="new-task-btn"
+              className="flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-80"
+            >
+              <Plus className="h-4 w-4" />
               New Task
-            </Button>
+            </button>
           </div>
         </div>
 
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant={view === "board" ? "default" : "outline"}
-                  onClick={() => setView("board")}
-                >
-                  <LayoutGrid className="mr-2 h-4 w-4" />
-                  Board
-                </Button>
-                <Button
-                  size="sm"
-                  variant={view === "list" ? "default" : "outline"}
-                  onClick={() => setView("list")}
-                >
-                  <List className="mr-2 h-4 w-4" />
-                  List
-                </Button>
-              </div>
-              <span className="text-sm font-bold">{sortedTasks.length} tasks</span>
+        {listTab === "discover" && (
+          <div className="mb-4">
+            <p className="mb-5 text-sm text-neutral-500">Pre-built tasks — click <strong>Use</strong> to customise and save.</p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {DISCOVER_TEMPLATES.map((tpl) => (
+                <div key={tpl.id} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                  <div className="mb-1 flex items-start justify-between">
+                    <span className="text-xs font-medium text-neutral-400">{tpl.category}</span>
+                    <div className="flex gap-1">
+                      {tpl.integrations.map((s) => <SlugIcon key={s} slug={s} />)}
+                    </div>
+                  </div>
+                  <div className="mb-1.5 text-base font-semibold text-neutral-900">{tpl.name}</div>
+                  <p className="mb-4 text-sm text-neutral-500 line-clamp-2">{tpl.description}</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-neutral-400">{cronHumanFromDraft({ cadence: tpl.cadence, timeOfDay: tpl.timeOfDay, daysOfWeek: [] })}</span>
+                    <button
+                      onClick={() => openCreate(tpl)}
+                      className="rounded-lg bg-black px-3 py-1.5 text-xs font-medium text-white hover:opacity-80"
+                    >
+                      Use
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
-          </CardContent>
-        </Card>
-
-        {view === "board" ? (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xl">Task Board</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 xl:grid-cols-3">
-                {(["active", "paused", "archived"] as const).map((status) => (
-                  <div key={status} className="rounded-md border bg-muted/20 p-3">
-                    <div className="mb-2 text-base font-bold">
-                      {statusColumnLabel(status)} ({tasksByStatus[status].length})
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {tasksByStatus[status].map((task) => (
-                        <div
-                          key={task._id}
-                          className="cursor-pointer rounded-md border bg-background p-3 transition-shadow hover:shadow-sm"
-                          onClick={() => openEditTask(task)}
-                        >
-                          <div className="mb-2 flex items-start justify-between gap-2">
-                            <div className="line-clamp-2 text-sm font-bold">{task.title}</div>
-                            <StatusBadge status={task.status} />
-                          </div>
-                          <div className="mb-2 line-clamp-2 text-xs text-muted-foreground">
-                            {task.instruction}
-                          </div>
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>{formatSchedule(task)}</span>
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void handleRunNow(task._id);
-                                }}
-                              >
-                                <Rocket className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void toggleTaskStatus(task);
-                                }}
-                              >
-                                {task.status === "active" ? (
-                                  <Pause className="h-3.5 w-3.5" />
-                                ) : (
-                                  <Play className="h-3.5 w-3.5" />
-                                )}
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xl">Task List</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col gap-2">
-                {sortedTasks.map((task) => (
-                  <div
-                    key={task._id}
-                    className="flex cursor-pointer items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent"
-                    onClick={() => openEditTask(task)}
-                  >
-                    <div>
-                      <div className="text-base font-bold">{task.title}</div>
-                      <div className="text-sm text-muted-foreground">
-                        {formatSchedule(task)}
-                        {task.schedule?.nextRunAt ? ` • Next ${formatRunTime(task.schedule.nextRunAt)}` : ""}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={task.status} />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleRunNow(task._id);
-                        }}
-                      >
-                        <Rocket className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openEditTask(task);
-                        }}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          </div>
         )}
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xl">Upcoming Tasks</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-2">
-              {upcomingTasks.map((task) => (
-                <div
-                  key={task._id}
-                  className="flex cursor-pointer items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent"
-                  onClick={() => openEditTask(task)}
-                >
-                  <div>
-                    <div className="text-base font-bold">{task.title}</div>
-                    <div className="text-sm text-muted-foreground">
-                      <CalendarIcon className="mr-1 inline h-3.5 w-3.5" />
-                      {task.schedule?.nextRunAt
-                        ? `Next ${formatRunTime(task.schedule.nextRunAt)}`
-                        : "No next run scheduled"}
-                      {" • "}
-                      {task.schedule?.cron ?? "manual"}
+        {listTab === "tasks" && (
+          <>
+            {scheduledTasks.length > 0 && (
+              <div className="mb-8">
+                <h2 className="mb-4 text-xl font-bold text-neutral-900">Scheduled</h2>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {scheduledTasks.map((task) => (
+                    <div
+                      key={task._id}
+                      onClick={() => setDetailTaskId(task._id)}
+                      className="group cursor-pointer rounded-xl border border-neutral-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+                    >
+                      <div className="mb-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs text-neutral-500">
+                          <ActiveBadge status={task.status} />
+                          <span>{task.schedule?.cronHuman}</span>
+                        </div>
+                        <button onClick={(e) => e.stopPropagation()} className="rounded p-0.5 text-neutral-300 hover:text-neutral-600">
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
+                          </svg>
+                        </button>
+                      </div>
+                      <div className="mb-3 text-base font-semibold text-neutral-900 line-clamp-1">{task.title}</div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          {(task.integrationSlugs ?? []).slice(0, 3).map((slug) => (
+                            <SlugIcon key={slug} slug={slug} />
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                          <button
+                            onClick={(e) => void handleRunNow(task._id, e)}
+                            disabled={runningTaskId === task._id}
+                            className="rounded-md border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                          >
+                            {runningTaskId === task._id ? "…" : "Run"}
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setDetailTaskId(task._id); }}
+                            className="flex items-center gap-1 rounded-md border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                          >
+                            View <span className="text-neutral-400">→</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={task.status} />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleRunNow(task._id);
-                      }}
-                    >
-                      <CheckCircle className="h-4 w-4 text-green-600" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openEditTask(task);
-                      }}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void toggleTaskStatus(task);
-                      }}
-                    >
-                      {task.status === "active" ? (
-                        <Pause className="h-4 w-4" />
-                      ) : (
-                        <Play className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xl">Recent Logs</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-2">
-              {(recentEvents ?? []).slice(0, 6).map((event) => (
-                <div key={event._id} className="rounded-md border p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-bold">{event.type.replaceAll("_", " ")}</div>
-                    <div className="text-xs text-muted-foreground">{formatRunTime(event.createdAt)}</div>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                    <Clock className="h-3.5 w-3.5" />
-                    {event.source}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {disconnectedToolkits.length > 0 ? (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xl">Connect Apps</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {disconnectedToolkits.slice(0, 6).map((toolkit) => (
-                  <Button
-                    key={toolkit.slug}
-                    variant="outline"
-                    onClick={() => void onConnect(toolkit.slug)}
-                  >
-                    {toolkit.name}
-                  </Button>
-                ))}
               </div>
-            </CardContent>
-          </Card>
-        ) : null}
+            )}
+
+            {otherTasks.length > 0 && (
+              <div>
+                <h2 className="mb-4 text-xl font-bold text-neutral-900">Tasks</h2>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {otherTasks.map((task) => (
+                    <div
+                      key={task._id}
+                      onClick={() => setDetailTaskId(task._id)}
+                      className="group cursor-pointer rounded-xl border border-neutral-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+                    >
+                      <div className="mb-3 flex items-center justify-between">
+                        <ActiveBadge status={task.status} />
+                        <button onClick={(e) => e.stopPropagation()} className="rounded p-0.5 text-neutral-300 hover:text-neutral-600">
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <circle cx="8" cy="3" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="13" r="1.2" />
+                          </svg>
+                        </button>
+                      </div>
+                      <div className="mb-3 text-base font-semibold text-neutral-900 line-clamp-1">{task.title}</div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          {(task.integrationSlugs ?? []).slice(0, 3).map((slug) => (
+                            <SlugIcon key={slug} slug={slug} />
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                          <button
+                            onClick={(e) => void handleRunNow(task._id, e)}
+                            disabled={runningTaskId === task._id}
+                            className="rounded-md border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                          >
+                            {runningTaskId === task._id ? "…" : "Run"}
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setDetailTaskId(task._id); }}
+                            className="flex items-center gap-1 rounded-md border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                          >
+                            View <span className="text-neutral-400">→</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {listTab === "tasks" && filteredTasks.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="mb-3 text-4xl">⏱</div>
+            <div className="mb-1 text-base font-semibold text-neutral-700">No tasks yet</div>
+            <div className="mb-6 text-sm text-neutral-400">Create a task or ask Cryzo to set one up for you.</div>
+            <button
+              onClick={() => openCreate()}
+              className="flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-80"
+            >
+              <Plus className="h-4 w-4" />
+              New Task
+            </button>
+          </div>
+        )}
       </div>
 
-      {isTaskDialogOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold">
-                {selectedTask ? "Edit Task" : "Create New Task"}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsTaskDialogOpen(false)}
-                className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
-              >
-                Close
-              </button>
-            </div>
-            <form onSubmit={handleSubmitTask} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Title</label>
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  required
-                  className="h-11 w-full rounded-xl border border-neutral-300 px-4 text-sm outline-none focus:border-black"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Instruction</label>
-                <textarea
-                  value={instruction}
-                  onChange={(e) => setInstruction(e.target.value)}
-                  rows={5}
-                  required
-                  className="w-full rounded-xl border border-neutral-300 px-4 py-3 text-sm outline-none focus:border-black"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Cadence</label>
-                  <Select value={cadence} onValueChange={(value) => setCadence(value as TaskCadence)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="hourly">Hourly</SelectItem>
-                      <SelectItem value="daily">Daily</SelectItem>
-                      <SelectItem value="weekly">Weekly</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Time</label>
-                  <input
-                    type="time"
-                    value={timeOfDay}
-                    onChange={(e) => setTimeOfDay(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-neutral-300 px-4 text-sm outline-none focus:border-black"
-                  />
-                </div>
-              </div>
-              <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-                <div className="font-mono">{cronFromDraft({ cadence, timeOfDay, daysOfWeek: [] })}</div>
-                <div className="mt-1">{cronHumanFromDraft({ cadence, timeOfDay, daysOfWeek: [] })}</div>
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <Button variant="outline" type="button" onClick={() => setIsTaskDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit">
-                  {selectedTask ? "Update Task" : "Create Task"}
-                </Button>
-              </div>
-            </form>
-          </div>
+      {isDialogOpen && (
+        <TaskDialog
+          editing={editingTask}
+          title={title} setTitle={setTitle}
+          instruction={instruction} setInstruction={setInstruction}
+          cadence={cadence} setCadence={setCadence}
+          timeOfDay={timeOfDay} setTimeOfDay={setTimeOfDay}
+          onSubmit={handleSubmit}
+          onClose={() => setIsDialogOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TaskDialog({
+  editing, title, setTitle, instruction, setInstruction,
+  cadence, setCadence, timeOfDay, setTimeOfDay, onSubmit, onClose,
+}: {
+  editing: TaskItem | null;
+  title: string; setTitle: (v: string) => void;
+  instruction: string; setInstruction: (v: string) => void;
+  cadence: TaskCadence; setCadence: (v: TaskCadence) => void;
+  timeOfDay: string; setTimeOfDay: (v: string) => void;
+  onSubmit: (e: React.FormEvent<HTMLFormElement>) => Promise<void>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="text-base font-semibold">{editing ? "Edit Task" : "New Task"}</h3>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M2 2l12 12M14 2L2 14" />
+            </svg>
+          </button>
         </div>
-      ) : null}
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-neutral-700">Title</label>
+            <input
+              value={title} onChange={(e) => setTitle(e.target.value)} required
+              placeholder="e.g. Daily Unread Gmail Digest"
+              className="h-10 w-full rounded-lg border border-neutral-200 px-3 text-sm outline-none focus:border-black focus:ring-1 focus:ring-black"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-neutral-700">Instruction</label>
+            <textarea
+              value={instruction} onChange={(e) => setInstruction(e.target.value)} rows={4} required
+              placeholder="Describe what this task should do…"
+              className="w-full rounded-lg border border-neutral-200 px-3 py-2.5 text-sm outline-none focus:border-black focus:ring-1 focus:ring-black"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-neutral-700">Schedule</label>
+            <div className="flex flex-wrap gap-2">
+              {CRON_PRESETS.map((preset) => {
+                const isCustom = preset.label === "Custom";
+                const isActive = !isCustom
+                  ? cadence === preset.cadence && timeOfDay === preset.timeOfDay
+                  : !CRON_PRESETS.filter((p) => p.label !== "Custom").some(
+                      (p) => cadence === p.cadence && timeOfDay === p.timeOfDay,
+                    );
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => { if (!isCustom) { setCadence(preset.cadence); setTimeOfDay(preset.timeOfDay); } }}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      isActive
+                        ? "border-black bg-black text-white"
+                        : "border-neutral-200 text-neutral-600 hover:border-neutral-400"
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+            {!CRON_PRESETS.filter((p) => p.label !== "Custom").some(
+              (p) => cadence === p.cadence && timeOfDay === p.timeOfDay,
+            ) && (
+              <div className="mt-2 grid grid-cols-2 gap-3">
+                <Select value={cadence} onValueChange={(v) => setCadence(v as TaskCadence)}>
+                  <SelectTrigger className="h-9 rounded-lg border-neutral-200 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="hourly">Hourly</SelectItem>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                  </SelectContent>
+                </Select>
+                <input
+                  type="time" value={timeOfDay} onChange={(e) => setTimeOfDay(e.target.value)}
+                  className="h-9 rounded-lg border border-neutral-200 px-3 text-sm outline-none focus:border-black"
+                />
+              </div>
+            )}
+            <p className="pt-1 text-xs text-neutral-400">
+              {cronHumanFromDraft({ cadence, timeOfDay, daysOfWeek: [] })}
+              <span className="ml-2 font-mono">{cronFromDraft({ cadence, timeOfDay, daysOfWeek: [] })}</span>
+            </p>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="rounded-lg border border-neutral-200 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50">
+              Cancel
+            </button>
+            <button type="submit" className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-80">
+              {editing ? "Update" : "Create Task"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

@@ -317,6 +317,21 @@ export const listRecentRuns = query({
   },
 });
 
+export const listRunsByTask = query({
+  args: {
+    taskId: v.id("autonomousTasks"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.max(1, Math.min(args.limit ?? 20, 50));
+    return await ctx.db
+      .query("autonomousRuns")
+      .withIndex("by_task_created", (q) => q.eq("taskId", args.taskId))
+      .order("desc")
+      .take(limit);
+  },
+});
+
 export const listRecentEventsByTask = query({
   args: {
     taskId: v.id("autonomousTasks"),
