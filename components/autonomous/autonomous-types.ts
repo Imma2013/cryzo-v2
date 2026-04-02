@@ -1,4 +1,4 @@
-export type AppView = "chat" | "autonomous" | "apps" | "billing";
+export type AppView = "chat" | "autonomous" | "apps" | "billing" | "analytics";
 
 export type ToolkitConnection = {
   slug: string;

@@ -117,27 +117,66 @@ const DISCOVER_TEMPLATES = [
   },
 ];
 
-const SLUG_COLORS: Record<string, string> = {
-  gmail: "bg-red-100 text-red-700",
-  googlecalendar: "bg-blue-100 text-blue-700",
-  googlesheets: "bg-green-100 text-green-700",
-  googledrive: "bg-yellow-100 text-yellow-700",
-  googledocs: "bg-blue-100 text-blue-600",
-  slack: "bg-purple-100 text-purple-700",
-  notion: "bg-neutral-200 text-neutral-700",
-  twitter: "bg-sky-100 text-sky-700",
-  reddit: "bg-orange-100 text-orange-700",
-  github: "bg-neutral-200 text-neutral-800",
-  linear: "bg-violet-100 text-violet-700",
-  youtube: "bg-red-100 text-red-600",
+const SLUG_DOMAINS: Record<string, string> = {
+  gmail: "gmail.com",
+  googlecalendar: "calendar.google.com",
+  googlesheets: "sheets.google.com",
+  googledrive: "drive.google.com",
+  googledocs: "docs.google.com",
+  youtube: "youtube.com",
+  twitter: "twitter.com",
+  reddit: "reddit.com",
+  hackernews: "news.ycombinator.com",
+  shopify: "shopify.com",
+  linkedin: "linkedin.com",
+  linkedin_ads: "linkedin.com",
+  google_maps: "maps.google.com",
+  one_drive: "onedrive.live.com",
+  salesforce: "salesforce.com",
+  slackbot: "slack.com",
+  slack: "slack.com",
+  stripe: "stripe.com",
+  cursor: "cursor.sh",
+  metaads: "facebook.com",
+  facebook: "facebook.com",
+  instagram: "instagram.com",
+  tiktok: "tiktok.com",
+  canva: "canva.com",
+  google_analytics: "analytics.google.com",
+  googleads: "ads.google.com",
+  google_search_console: "search.google.com",
+  mailchimp: "mailchimp.com",
+  browserbase_tool: "browserbase.com",
+  browser_tool: "google.com",
+  notion: "notion.so",
+  github: "github.com",
+  airtable: "airtable.com",
+  hubspot: "hubspot.com",
+  asana: "asana.com",
+  jira: "atlassian.com",
+  trello: "trello.com",
+  zoom: "zoom.us",
+  discord: "discord.com",
 };
 
 function SlugIcon({ slug }: { slug: string }) {
-  const color = SLUG_COLORS[slug.toLowerCase()] ?? "bg-neutral-100 text-neutral-600";
-  const label = slug.slice(0, 2).toUpperCase();
+  const [failed, setFailed] = useState(false);
+  const domain = SLUG_DOMAINS[slug.toLowerCase()];
+  if (domain && !failed) {
+    return (
+      <img
+        src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+        alt={slug}
+        width={24}
+        height={24}
+        className="h-6 w-6 rounded-sm"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
   return (
-    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-[10px] font-bold ${color}`}>
-      {label}
+    <span className="inline-flex h-6 w-6 items-center justify-center rounded-sm bg-neutral-100 text-[9px] font-bold text-neutral-600">
+      {slug.slice(0, 2).toUpperCase()}
     </span>
   );
 }
@@ -505,6 +544,22 @@ export function AutonomousView({ userId, toolkits, onConnect }: AutonomousViewPr
             </button>
           </div>
         </div>
+
+        {listTab === "tasks" && tasks && tasks.length > 0 && (
+          <div className="mb-6 flex items-center gap-5 text-sm">
+            <span className="text-neutral-500"><span className="font-semibold text-neutral-900">{tasks.length}</span> total</span>
+            <span className="h-3 w-px bg-neutral-200" />
+            <span className="text-neutral-500"><span className="font-semibold text-neutral-900">{tasks.filter((t) => t.status === "active").length}</span> active</span>
+            <span className="h-3 w-px bg-neutral-200" />
+            <span className="text-neutral-500"><span className="font-semibold text-neutral-900">{scheduledTasks.length}</span> scheduled</span>
+            {tasks.filter((t) => t.status === "paused").length > 0 && (
+              <>
+                <span className="h-3 w-px bg-neutral-200" />
+                <span className="text-neutral-500"><span className="font-semibold text-neutral-900">{tasks.filter((t) => t.status === "paused").length}</span> paused</span>
+              </>
+            )}
+          </div>
+        )}
 
         {listTab === "discover" && (
           <div className="mb-4">

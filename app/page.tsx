@@ -14,6 +14,7 @@ import type {
   ToolkitConnection,
 } from "../components/autonomous/autonomous-types";
 import { AutonomousView } from "../components/autonomous/autonomous-view";
+import { AnalyticsView } from "../components/analytics/analytics-view";
 import { BillingView } from "../components/billing/billing-view";
 import { ChatSidebar } from "../components/chat/chat-sidebar";
 import { ToolCallDisplay } from "../components/ToolCallDisplay";
@@ -1131,6 +1132,10 @@ export default function ChatPage() {
                 ))}
               </div>
             </div>
+          </div>
+        ) : activeView === "analytics" ? (
+          <div className="flex-1 overflow-y-auto">
+            <AnalyticsView toolkits={toolkits} />
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">

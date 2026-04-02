@@ -119,6 +119,30 @@ export function ChatSidebar({
           <span>Apps</span>
         </button>
         <button
+          onClick={() => onSelectView("analytics")}
+          className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
+            activeView === "analytics"
+              ? "bg-neutral-100 text-black"
+              : "text-neutral-500 hover:bg-neutral-50 hover:text-black"
+          }`}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 3v18h18" />
+            <path d="M7 16l4-8 4 4 4-6" />
+          </svg>
+          <span>Analytics</span>
+        </button>
+        <button
           onClick={() => onSelectView("billing")}
           className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
             activeView === "billing"
