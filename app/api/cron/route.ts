@@ -4,14 +4,40 @@ import { api } from "../../../convex/_generated/api";
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import { streamText } from "ai";
+import { createHash } from "crypto";
 import { getAiModel } from "../../../lib/ai-model";
 import { nextCronTickFromExpression } from "../../../lib/cron";
 
-const CRON_SECRET = process.env.CRON_SECRET || "default-cron-secret-change-me";
+function describeSecret(secret: string | undefined) {
+  const normalized = secret?.trim() ?? "";
+  return {
+    present: normalized.length > 0,
+    length: normalized.length,
+    sha256: normalized
+      ? createHash("sha256").update(normalized).digest("hex").slice(0, 12)
+      : null,
+  };
+}
 
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${CRON_SECRET}`) {
+  const cronSecret =
+    process.env.CRON_SECRET?.trim() || "default-cron-secret-change-me";
+  const authHeader = req.headers.get("authorization")?.trim() ?? "";
+
+  if (authHeader !== `Bearer ${cronSecret}`) {
+    console.error("Cron auth mismatch", {
+      provided: {
+        present: authHeader.length > 0,
+        length: authHeader.length,
+        sha256: authHeader
+          ? createHash("sha256").update(authHeader).digest("hex").slice(0, 12)
+          : null,
+      },
+      expected: {
+        bearerLength: `Bearer ${cronSecret}`.length,
+        ...describeSecret(process.env.CRON_SECRET),
+      },
+    });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
