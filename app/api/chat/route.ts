@@ -77,12 +77,20 @@ export async function POST(req: Request) {
   const recipeTools = getRecipeTools(userId || "pg-test-pg-test-43d08743-c471-4d27-ac73-9b9398880252");
   const allTools = { ...composioTools, ...recipeTools };
 
+  const systemPrompt = `You are Cryzo, an intelligent AI agent. Help the user accomplish tasks using their connected apps. Today's date is ${new Date().toLocaleDateString()}. You can create scheduled recurring recipes using RECIPE_CREATE when the user wants something automated on a schedule (e.g., "send me unread emails every morning").
+
+Important:
+- RECIPE_CREATE, RECIPE_LIST, RECIPE_PAUSE, and RECIPE_DELETE are native Cryzo tools, not Composio tools.
+- Do not try to search for schemas or discover those recipe tools through Composio.
+- For recurring requests, call RECIPE_CREATE directly.
+- Prefer scheduleText like "every day at 8am Chicago time" unless you already have a valid UTC cron string.`;
+
   const result = streamText({
     model: getAiModel({
       messages,
-      system: `You are Cryzo, an intelligent AI agent. Help the user accomplish tasks using their connected apps. Today's date is ${new Date().toLocaleDateString()}. You can create scheduled recurring recipes using RECIPE_CREATE when the user wants something automated on a schedule (e.g., "send me unread emails every morning").`,
+      system: systemPrompt,
     }),
-    system: `You are Cryzo, an intelligent AI agent. Help the user accomplish tasks using their connected apps. Today's date is ${new Date().toLocaleDateString()}. You can create scheduled recurring recipes using RECIPE_CREATE when the user wants something automated on a schedule (e.g., "send me unread emails every morning").`,
+    system: systemPrompt,
     messages: await convertToModelMessages(messages),
     tools: allTools,
     stopWhen: stepCountIs(25),
@@ -113,7 +121,7 @@ export async function POST(req: Request) {
           userId,
           model: getAiModelName({
             messages,
-            system: `You are Cryzo, an intelligent AI agent. Help the user accomplish tasks using their connected apps. Today's date is ${new Date().toLocaleDateString()}. You can create scheduled recurring recipes using RECIPE_CREATE when the user wants something automated on a schedule (e.g., "send me unread emails every morning").`,
+            system: systemPrompt,
           }),
           inputTokens,
           outputTokens,

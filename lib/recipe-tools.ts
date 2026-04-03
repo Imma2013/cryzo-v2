@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../convex/_generated/api";
-import { nextCronTickFromExpression, validateCron } from "./cron";
+import { deriveCronFromText, nextCronTickFromExpression, validateCron } from "./cron";
 
 function getConvex(): ConvexHttpClient | null {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -34,9 +34,12 @@ export function getRecipeTools(userId: string) {
       "Be specific: include what data to fetch, what to do with it, and where to send results. " +
       "Example: 'Fetch unread emails from Gmail, summarize them into 3 bullet points, and send to lloyd.ebone@gmail.com'"
     ),
-    cron: z.string().describe(
-      "5-field cron expression (minute hour day month weekday) in UTC. " +
+    cron: z.string().optional().describe(
+      "Optional 5-field cron expression (minute hour day month weekday) in UTC. " +
       "Examples: '0 13 * * *' (1 PM UTC daily), '0 9 * * 1' (Mondays 9 AM UTC)"
+    ),
+    scheduleText: z.string().optional().describe(
+      "Natural schedule text if cron is not supplied. Examples: 'every day at 8am', 'weekdays at 9:30am', 'every monday at 1pm Chicago time'."
     ),
     timezone: z.string().default("UTC").describe("User's timezone for reference, e.g., 'America/Chicago'"),
     integrationSlugs: z.array(z.string()).default([]).describe(
@@ -49,19 +52,35 @@ export function getRecipeTools(userId: string) {
       "Create a new scheduled recurring recipe that runs on a cron schedule. " +
       "Use this when the user asks to do something automatically on a recurring basis, " +
       "e.g., 'Send me unread emails every morning at 8 AM' or 'Post a summary to Slack daily at noon'. " +
-      "The cron expression MUST be in standard 5-field format: minute hour day-of-month month day-of-week (UTC time). " +
-      "Example: '0 8 * * *' = 8:00 AM UTC daily. '30 17 * * 1-5' = 5:30 PM UTC weekdays.",
+      "Prefer passing scheduleText for plain-English schedules; cron is optional. " +
+      "If using cron, it must be standard 5-field UTC: minute hour day-of-month month day-of-week.",
     parameters: createSchema,
     // @ts-expect-error - Vercel AI SDK tool() overload resolution issue
-    execute: async ({ title, instruction, cron, timezone, integrationSlugs }) => {
+    execute: async ({ title, instruction, cron, scheduleText, timezone, integrationSlugs }) => {
       if (!convex) return { success: false, error: "Convex not configured" };
 
-      const cronError = validateCron(cron);
+      const resolvedCron = deriveCronFromText({
+        cron,
+        scheduleText,
+        instruction,
+        title,
+        timezone,
+      });
+
+      if (!resolvedCron) {
+        return {
+          success: false,
+          error:
+            "Missing schedule. Provide either cron or scheduleText like 'every day at 8am Chicago time'.",
+        };
+      }
+
+      const cronError = validateCron(resolvedCron);
       if (cronError) {
         return { success: false, error: `Invalid cron expression: ${cronError}` };
       }
 
-      const nextRun = nextCronTickFromExpression(cron, new Date());
+      const nextRun = nextCronTickFromExpression(resolvedCron, new Date());
       if (!nextRun) {
         return { success: false, error: "Could not compute next run time from cron expression" };
       }
@@ -71,8 +90,8 @@ export function getRecipeTools(userId: string) {
           userId,
           title,
           instruction,
-          cron,
-          cronHuman: humanizeCron(cron),
+          cron: resolvedCron,
+          cronHuman: humanizeCron(resolvedCron),
           timezone,
           integrationSlugs,
           nextRunAt: nextRun.toISOString(),
@@ -82,6 +101,7 @@ export function getRecipeTools(userId: string) {
           success: true,
           recipeId: result.recipeId,
           message: `Recipe "${title}" created. First run: ${nextRun.toLocaleString('en-US', { timeZone: timezone })} (${timezone}).`,
+          cron: resolvedCron,
           nextRunAt: nextRun.toISOString(),
         };
       } catch (error) {

@@ -128,3 +128,182 @@ export function nextCronTick(cron: ParsedCron, after: Date): Date | null {
 export function nextCronTickFromExpression(expr: string, after: Date = new Date()): Date | null {
   return nextCronTick(parseCron(expr), after);
 }
+
+function getTimeZoneParts(date: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const get = (type: string) =>
+    Number(parts.find((part) => part.type === type)?.value ?? "0");
+
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+    second: get("second"),
+  };
+}
+
+function getTimeZoneOffsetMinutes(date: Date, timeZone: string) {
+  const parts = getTimeZoneParts(date, timeZone);
+  const utcMs = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+  );
+  return Math.round((utcMs - date.getTime()) / 60000);
+}
+
+function normalizeTimezone(timeZone?: string) {
+  const raw = (timeZone || "UTC").trim();
+  const lower = raw.toLowerCase();
+
+  if (lower.includes("chicago") || lower === "cst" || lower === "cdt") {
+    return "America/Chicago";
+  }
+  if (lower.includes("new york") || lower === "est" || lower === "edt") {
+    return "America/New_York";
+  }
+  if (lower.includes("los angeles") || lower === "pst" || lower === "pdt") {
+    return "America/Los_Angeles";
+  }
+
+  return raw || "UTC";
+}
+
+function parseClock(text: string) {
+  const match = text.match(
+    /\b(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i,
+  );
+  if (!match) {
+    return null;
+  }
+
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? "0");
+  const meridiem = match[3]?.toLowerCase();
+
+  if (Number.isNaN(hour) || Number.isNaN(minute) || minute > 59) {
+    return null;
+  }
+
+  if (meridiem === "am") {
+    hour = hour % 12;
+  } else if (meridiem === "pm") {
+    hour = (hour % 12) + 12;
+  }
+
+  if (hour > 23) {
+    return null;
+  }
+
+  return { hour, minute };
+}
+
+function localTimeToUtcHourMinute(hour: number, minute: number, timeZone: string) {
+  const now = new Date();
+  const offsetMinutes = getTimeZoneOffsetMinutes(now, timeZone);
+  const totalLocalMinutes = hour * 60 + minute;
+  const totalUtcMinutes = ((totalLocalMinutes - offsetMinutes) % 1440 + 1440) % 1440;
+
+  return {
+    hour: Math.floor(totalUtcMinutes / 60),
+    minute: totalUtcMinutes % 60,
+  };
+}
+
+export function deriveCronFromText(input: {
+  cron?: string;
+  scheduleText?: string;
+  instruction?: string;
+  title?: string;
+  timezone?: string;
+}) {
+  const explicitCron = input.cron?.trim();
+  if (explicitCron) {
+    return explicitCron;
+  }
+
+  const combined = [
+    input.scheduleText,
+    input.instruction,
+    input.title,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!combined) {
+    return null;
+  }
+
+  const text = combined.toLowerCase();
+  const timeZone = normalizeTimezone(input.timezone);
+  const parsedTime =
+    parseClock(text) ||
+    (text.includes("morning")
+      ? { hour: 8, minute: 0 }
+      : text.includes("noon")
+        ? { hour: 12, minute: 0 }
+        : text.includes("afternoon")
+          ? { hour: 15, minute: 0 }
+          : text.includes("evening")
+            ? { hour: 18, minute: 0 }
+            : null);
+
+  const time = parsedTime ?? { hour: 9, minute: 0 };
+  const utc = localTimeToUtcHourMinute(time.hour, time.minute, timeZone);
+
+  const weekdayMap: Record<string, number> = {
+    sunday: 0,
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+  };
+
+  for (const [day, value] of Object.entries(weekdayMap)) {
+    if (text.includes(`every ${day}`) || text.includes(`on ${day}`)) {
+      return `${utc.minute} ${utc.hour} * * ${value}`;
+    }
+  }
+
+  if (text.includes("weekday") || text.includes("weekdays")) {
+    return `${utc.minute} ${utc.hour} * * 1-5`;
+  }
+
+  if (text.includes("hourly") || text.includes("every hour")) {
+    return `0 * * * *`;
+  }
+
+  if (text.includes("daily") || text.includes("every day") || text.includes("every morning")) {
+    return `${utc.minute} ${utc.hour} * * *`;
+  }
+
+  if (text.includes("weekly") || text.includes("every week")) {
+    return `${utc.minute} ${utc.hour} * * 1`;
+  }
+
+  if (text.includes("monthly") || text.includes("every month")) {
+    return `${utc.minute} ${utc.hour} 1 * *`;
+  }
+
+  return null;
+}
