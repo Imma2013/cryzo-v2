@@ -10,6 +10,7 @@ import { useAuthState } from "react-firebase-hooks/auth";
 import { AnalyticsView } from "../components/analytics/analytics-view";
 import { BillingView } from "../components/billing/billing-view";
 import { ChatSidebar } from "../components/chat/chat-sidebar";
+import { RecipesView } from "../components/recipes/recipes-view";
 import { ToolCallDisplay } from "../components/ToolCallDisplay";
 import { api } from "../convex/_generated/api";
 import { useBillingSummary } from "../hooks/use-billing-summary";
@@ -18,7 +19,7 @@ import { useLocalStorage } from "../hooks/use-local-storage";
 import { auth, googleProvider } from "../lib/firebase";
 import { tokensToCredits } from "../lib/pricing";
 
-type AppView = "chat" | "apps" | "billing" | "analytics";
+type AppView = "chat" | "tasks" | "apps" | "billing" | "analytics";
 
 type ToolkitConnection = {
   slug: string;
@@ -548,6 +549,10 @@ export default function ChatPage() {
               </form>
             </div>
           </>
+        ) : activeView === "tasks" ? (
+          <div className="flex-1 overflow-y-auto">
+            <RecipesView userId={user?.uid ?? null} />
+          </div>
         ) : activeView === "apps" ? (
           <div className="flex-1 overflow-y-auto p-6">
             <div className="mx-auto max-w-5xl">

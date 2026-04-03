@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { ChatSummary } from "../../hooks/use-chat-history";
 
-type AppView = "chat" | "apps" | "billing" | "analytics";
+type AppView = "chat" | "tasks" | "apps" | "billing" | "analytics";
 
 type ChatSidebarProps = {
   activeView: AppView;
@@ -65,6 +65,34 @@ export function ChatSidebar({
       </div>
 
       <div className="border-b border-neutral-200 px-2 py-2">
+        <button
+          onClick={() => onSelectView("tasks")}
+          className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
+            activeView === "tasks"
+              ? "bg-neutral-100 text-black"
+              : "text-neutral-500 hover:bg-neutral-50 hover:text-black"
+          }`}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M9 6h11" />
+            <path d="M9 12h11" />
+            <path d="M9 18h11" />
+            <path d="M5 6h.01" />
+            <path d="M5 12h.01" />
+            <path d="M5 18h.01" />
+          </svg>
+          <span>Tasks</span>
+        </button>
         <button
           onClick={() => onSelectView("apps")}
           className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${

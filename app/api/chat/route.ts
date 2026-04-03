@@ -77,13 +77,19 @@ export async function POST(req: Request) {
   const recipeTools = getRecipeTools(userId || "pg-test-pg-test-43d08743-c471-4d27-ac73-9b9398880252");
   const allTools = { ...composioTools, ...recipeTools };
 
-  const systemPrompt = `You are Cryzo, an intelligent AI agent. Help the user accomplish tasks using their connected apps. Today's date is ${new Date().toLocaleDateString()}. You can create scheduled recurring recipes using RECIPE_CREATE when the user wants something automated on a schedule (e.g., "send me unread emails every morning"). You can create event-driven recipes using RECIPE_CREATE_TRIGGER when the user says "when", "whenever", or wants to react to app events.
+  const systemPrompt = `You are Cryzo, an intelligent AI agent. Help the user accomplish tasks using their connected apps. Today's date is ${new Date().toLocaleDateString()}. Build reusable automations as saved recipes, then schedule or execute them.
 
 Important:
-- RECIPE_CREATE, RECIPE_CREATE_TRIGGER, RECIPE_LIST, RECIPE_PAUSE, and RECIPE_DELETE are native Cryzo tools, not Composio tools.
+- RECIPE_CREATE, RECIPE_CREATE_UPDATE, RECIPE_MANAGE_SCHEDULE, RECIPE_EXECUTE, RECIPE_CREATE_TRIGGER, RECIPE_LIST, RECIPE_PAUSE, and RECIPE_DELETE are native Cryzo tools, not Composio tools.
 - Do not try to search for schemas or discover those recipe tools through Composio.
-- For recurring time-based requests, call RECIPE_CREATE directly.
+- For a Rube-style recurring automation flow:
+  1. identify tools/integrations needed,
+  2. check missing connections,
+  3. call RECIPE_CREATE_UPDATE to save the reusable recipe definition,
+  4. call RECIPE_MANAGE_SCHEDULE to attach the schedule and params.
+- Use RECIPE_CREATE as a shortcut only when the request is simple and all required recipe details are obvious.
 - For event-driven requests tied to app events, call RECIPE_CREATE_TRIGGER directly.
+- When useful, include inputSchema, outputSchema, defaultInputData, and workflowCode in RECIPE_CREATE_UPDATE.
 - Prefer scheduleText like "every day at 8am Chicago time" unless you already have a valid UTC cron string.`;
 
   const result = streamText({

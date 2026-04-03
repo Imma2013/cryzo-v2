@@ -5,13 +5,14 @@ import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import { api } from "../convex/_generated/api";
 import { deriveCronFromText, nextCronTickFromExpression, validateCron } from "./cron";
+import { executeRecipeRun } from "./recipe-runner";
 
 function getConvex(): ConvexHttpClient | null {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL;
   return url ? new ConvexHttpClient(url) : null;
 }
 
-function humanizeCron(cron: string): string {
+function humanizeCron(cron: string) {
   const parts = cron.trim().split(/\s+/);
   if (parts.length !== 5) return cron;
   const [min, hour] = parts;
@@ -21,92 +22,191 @@ function humanizeCron(cron: string): string {
     const period = h >= 12 ? "PM" : "AM";
     const displayH = h % 12 === 0 ? 12 : h % 12;
     const displayM = String(m).padStart(2, "0");
-    return `At ${displayH}:${displayM} ${period} UTC`;
+    return `At ${displayH}:${displayM} ${period} UTC, every day`;
   }
   return cron;
 }
+
+const recipeDefinitionSchema = z.object({
+  title: z.string().describe("Short recipe name, e.g. Daily Unread Gmail Digest."),
+  description: z
+    .string()
+    .optional()
+    .describe("User-facing summary of what the recipe does."),
+  instruction: z.string().describe("Plain-language execution instruction for Cryzo."),
+  workflowCode: z
+    .string()
+    .optional()
+    .describe("Optional stored workflow definition or pseudo-code for the recipe."),
+  inputSchema: z
+    .record(z.string(), z.any())
+    .optional()
+    .describe("JSON-schema-like object describing the recipe input params."),
+  outputSchema: z
+    .record(z.string(), z.any())
+    .optional()
+    .describe("JSON-schema-like object describing the recipe output."),
+  defaultInputData: z
+    .record(z.string(), z.any())
+    .optional()
+    .describe("Default parameter values to use for manual and scheduled runs."),
+  timezone: z.string().default("UTC").describe("User timezone, e.g. America/Chicago."),
+  integrationSlugs: z
+    .array(z.string())
+    .default([])
+    .describe("Connected app slugs used by this recipe, e.g. ['gmail']."),
+});
+
+const scheduleSchema = z.object({
+  recipeId: z.string().describe("The recipe ID to schedule."),
+  cron: z.string().optional().describe("Optional 5-field UTC cron expression."),
+  scheduleText: z
+    .string()
+    .optional()
+    .describe("Plain-English schedule like 'every day at 8am Chicago time'."),
+  timezone: z.string().default("UTC").describe("Timezone to interpret scheduleText."),
+  params: z
+    .record(z.string(), z.any())
+    .optional()
+    .describe("Input params to pass for scheduled runs."),
+  targetStatus: z
+    .enum(["active", "paused"])
+    .default("active")
+    .describe("Whether to enable or pause the schedule."),
+});
+
+const executeSchema = z.object({
+  recipeId: z.string().describe("The recipe ID to execute immediately."),
+  inputData: z
+    .record(z.string(), z.any())
+    .optional()
+    .describe("Optional input params to override default recipe inputs."),
+});
+
+const triggerSchema = z.object({
+  title: z.string().describe("Short title for this trigger recipe."),
+  description: z.string().optional().describe("User-facing summary of the trigger recipe."),
+  instruction: z.string().describe("The instruction Cryzo should execute when this trigger fires."),
+  workflowCode: z
+    .string()
+    .optional()
+    .describe("Optional stored workflow definition or pseudo-code."),
+  inputSchema: z.record(z.string(), z.any()).optional(),
+  outputSchema: z.record(z.string(), z.any()).optional(),
+  defaultInputData: z.record(z.string(), z.any()).optional(),
+  triggerSlug: z.string().describe("The Composio trigger slug to subscribe to."),
+  triggerConfig: z.record(z.string(), z.any()).optional().default({}),
+  timezone: z.string().default("UTC"),
+  integrationSlugs: z.array(z.string()).default([]),
+});
+
+const quickCreateSchema = recipeDefinitionSchema.extend({
+  cron: z.string().optional(),
+  scheduleText: z.string().optional(),
+  params: z.record(z.string(), z.any()).optional(),
+  targetStatus: z.enum(["active", "paused"]).default("active"),
+});
 
 export function getRecipeTools(userId: string) {
   const convex = getConvex();
   const composio = new Composio({ provider: new VercelProvider() });
 
-  const createSchema = z.object({
-    title: z.string().describe("Short title for this recipe, e.g., 'Daily Gmail digest'"),
-    instruction: z.string().describe(
-      "The full instruction the AI agent should execute when this recipe runs. " +
-      "Be specific: include what data to fetch, what to do with it, and where to send results. " +
-      "Example: 'Fetch unread emails from Gmail, summarize them into 3 bullet points, and send to lloyd.ebone@gmail.com'"
-    ),
-    cron: z.string().optional().describe(
-      "Optional 5-field cron expression (minute hour day month weekday) in UTC. " +
-      "Examples: '0 13 * * *' (1 PM UTC daily), '0 9 * * 1' (Mondays 9 AM UTC)"
-    ),
-    scheduleText: z.string().optional().describe(
-      "Natural schedule text if cron is not supplied. Examples: 'every day at 8am', 'weekdays at 9:30am', 'every monday at 1pm Chicago time'."
-    ),
-    timezone: z.string().default("UTC").describe("User's timezone for reference, e.g., 'America/Chicago'"),
-    integrationSlugs: z.array(z.string()).default([]).describe(
-      "List of Composio integration slugs this recipe will use, e.g., ['gmail', 'slack']. Leave empty if unknown."
-    ),
-  });
+  async function applySchedule(args: z.infer<typeof scheduleSchema>) {
+    if (!convex) return { success: false, error: "Convex not configured" };
 
-  const RECIPE_CREATE = tool({
+    const recipe = await convex.query(api.recipes.getById, {
+      recipeId: args.recipeId as never,
+      userId,
+    });
+
+    if (!recipe) {
+      return { success: false, error: "Recipe not found" };
+    }
+
+    const resolvedCron = deriveCronFromText({
+      cron: args.cron,
+      scheduleText: args.scheduleText,
+      instruction: recipe.instruction,
+      title: recipe.title,
+      timezone: args.timezone,
+    });
+
+    if (!resolvedCron) {
+      return {
+        success: false,
+        error:
+          "Missing schedule. Provide either cron or scheduleText like 'every day at 8am Chicago time'.",
+      };
+    }
+
+    const cronError = validateCron(resolvedCron);
+    if (cronError) {
+      return { success: false, error: `Invalid cron expression: ${cronError}` };
+    }
+
+    const nextRun = nextCronTickFromExpression(resolvedCron, new Date());
+    if (!nextRun) {
+      return { success: false, error: "Could not compute next run time from cron expression." };
+    }
+
+    await convex.mutation(api.recipes.configureSchedule, {
+      recipeId: args.recipeId as never,
+      cron: resolvedCron,
+      cronHuman: humanizeCron(resolvedCron),
+      timezone: args.timezone,
+      scheduleParams: args.params,
+      nextRunAt: args.targetStatus === "active" ? nextRun.toISOString() : undefined,
+      status: args.targetStatus,
+    });
+
+    return {
+      success: true,
+      recipeId: args.recipeId,
+      status: args.targetStatus,
+      cron: resolvedCron,
+      nextRunAt: nextRun.toISOString(),
+      cronHuman: humanizeCron(resolvedCron),
+    };
+  }
+
+  const RECIPE_CREATE_UPDATE = tool({
     description:
-      "Create a new scheduled recurring recipe that runs on a cron schedule. " +
-      "Use this when the user asks to do something automatically on a recurring basis, " +
-      "e.g., 'Send me unread emails every morning at 8 AM' or 'Post a summary to Slack daily at noon'. " +
-      "Prefer passing scheduleText for plain-English schedules; cron is optional. " +
-      "If using cron, it must be standard 5-field UTC: minute hour day-of-month month day-of-week.",
-    parameters: createSchema,
-    // @ts-expect-error - Vercel AI SDK tool() overload resolution issue
-    execute: async ({ title, instruction, cron, scheduleText, timezone, integrationSlugs }) => {
+      "Create or update a reusable recipe definition. Use this before scheduling or executing recurring automations.",
+    parameters: recipeDefinitionSchema,
+    // @ts-expect-error - AI SDK tool typing issue
+    execute: async ({
+      title,
+      description,
+      instruction,
+      workflowCode,
+      inputSchema,
+      outputSchema,
+      defaultInputData,
+      timezone,
+      integrationSlugs,
+    }: z.infer<typeof recipeDefinitionSchema>) => {
       if (!convex) return { success: false, error: "Convex not configured" };
-
-      const resolvedCron = deriveCronFromText({
-        cron,
-        scheduleText,
-        instruction,
-        title,
-        timezone,
-      });
-
-      if (!resolvedCron) {
-        return {
-          success: false,
-          error:
-            "Missing schedule. Provide either cron or scheduleText like 'every day at 8am Chicago time'.",
-        };
-      }
-
-      const cronError = validateCron(resolvedCron);
-      if (cronError) {
-        return { success: false, error: `Invalid cron expression: ${cronError}` };
-      }
-
-      const nextRun = nextCronTickFromExpression(resolvedCron, new Date());
-      if (!nextRun) {
-        return { success: false, error: "Could not compute next run time from cron expression" };
-      }
 
       try {
         const result = await convex.mutation(api.recipes.create, {
           userId,
           title,
+          description,
           instruction,
+          workflowCode: workflowCode ?? instruction,
+          inputSchema,
+          outputSchema,
+          defaultInputData,
           mode: "schedule",
-          cron: resolvedCron,
-          cronHuman: humanizeCron(resolvedCron),
           timezone,
           integrationSlugs,
-          nextRunAt: nextRun.toISOString(),
+          status: "draft",
         });
 
         return {
           success: true,
           recipeId: result.recipeId,
-          message: `Recipe "${title}" created. First run: ${nextRun.toLocaleString('en-US', { timeZone: timezone })} (${timezone}).`,
-          cron: resolvedCron,
-          nextRunAt: nextRun.toISOString(),
+          message: `Recipe "${title}" created.`,
         };
       } catch (error) {
         return {
@@ -117,32 +217,66 @@ export function getRecipeTools(userId: string) {
     },
   });
 
-  const triggerSchema = z.object({
-    title: z.string().describe("Short title for this trigger recipe."),
-    instruction: z.string().describe(
-      "The instruction Cryzo should execute when this trigger fires."
-    ),
-    triggerSlug: z.string().describe(
-      "The Composio trigger slug to subscribe to, e.g. GMAIL_NEW_GMAIL_MESSAGE."
-    ),
-    triggerConfig: z.record(z.string(), z.any()).optional().default({}).describe(
-      "Trigger configuration required by the selected trigger slug."
-    ),
-    timezone: z.string().default("UTC").describe("User timezone for display/reference."),
-    integrationSlugs: z.array(z.string()).default([]).describe(
-      "List of integration slugs used by this trigger recipe."
-    ),
+  const RECIPE_MANAGE_SCHEDULE = tool({
+    description:
+      "Attach or update a schedule for a saved recipe. Use this after RECIPE_CREATE_UPDATE.",
+    parameters: scheduleSchema,
+    // @ts-expect-error - AI SDK tool typing issue
+    execute: async (args: z.infer<typeof scheduleSchema>) => applySchedule(args),
+  });
+
+  const RECIPE_EXECUTE = tool({
+    description: "Execute a saved recipe immediately with optional input overrides.",
+    parameters: executeSchema,
+    // @ts-expect-error - AI SDK tool typing issue
+    execute: async ({ recipeId, inputData }: z.infer<typeof executeSchema>) => {
+      if (!convex) return { success: false, error: "Convex not configured" };
+
+      const recipe = await convex.query(api.recipes.getById, {
+        recipeId: recipeId as never,
+        userId,
+      });
+
+      if (!recipe) {
+        return { success: false, error: "Recipe not found" };
+      }
+
+      try {
+        const output = await executeRecipeRun({
+          convex,
+          composio,
+          recipe,
+          source: "manual",
+          inputData,
+        });
+
+        return {
+          success: true,
+          recipeId,
+          output,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
   });
 
   const RECIPE_CREATE_TRIGGER = tool({
     description:
-      "Create an event-driven recipe backed by a real Composio trigger. " +
-      "Use this for requests like 'when I receive a Gmail, summarize it' or 'when a GitHub PR opens, post to Slack'.",
+      "Create an event-driven recipe backed by a real Composio trigger for when/whenever-style automations.",
     parameters: triggerSchema,
-    // @ts-expect-error - Vercel AI SDK tool() overload resolution issue
+    // @ts-expect-error - AI SDK tool typing issue
     execute: async ({
       title,
+      description,
       instruction,
+      workflowCode,
+      inputSchema,
+      outputSchema,
+      defaultInputData,
       triggerSlug,
       triggerConfig,
       timezone,
@@ -152,7 +286,7 @@ export function getRecipeTools(userId: string) {
 
       try {
         await composio.triggers.getType(triggerSlug);
-      } catch (error) {
+      } catch {
         return {
           success: false,
           error: `Unknown trigger slug: ${triggerSlug}.`,
@@ -167,13 +301,19 @@ export function getRecipeTools(userId: string) {
         const result = await convex.mutation(api.recipes.create, {
           userId,
           title,
+          description,
           instruction,
+          workflowCode: workflowCode ?? instruction,
+          inputSchema,
+          outputSchema,
+          defaultInputData,
           mode: "trigger",
           timezone,
           integrationSlugs,
           triggerSlug,
           triggerId: trigger.triggerId,
           triggerConfig,
+          status: "active",
         });
 
         return {
@@ -191,14 +331,65 @@ export function getRecipeTools(userId: string) {
     },
   });
 
-  const listSchema = z.object({
-    status: z.enum(["active", "paused"]).optional().describe("Filter by status, or omit to show all"),
+  const RECIPE_CREATE = tool({
+    description:
+      "Convenience shortcut to create a scheduled recipe definition and attach a schedule in one step.",
+    parameters: quickCreateSchema,
+    // @ts-expect-error - AI SDK tool typing issue
+    execute: async ({
+      title,
+      description,
+      instruction,
+      workflowCode,
+      inputSchema,
+      outputSchema,
+      defaultInputData,
+      timezone,
+      integrationSlugs,
+      cron,
+      scheduleText,
+      params,
+      targetStatus,
+    }: z.infer<typeof quickCreateSchema>) => {
+      if (!convex) return { success: false, error: "Convex not configured" };
+
+      const createResult = await convex.mutation(api.recipes.create, {
+        userId,
+        title,
+        description,
+        instruction,
+        workflowCode: workflowCode ?? instruction,
+        inputSchema,
+        outputSchema,
+        defaultInputData,
+        mode: "schedule",
+        timezone,
+        integrationSlugs,
+        status: "draft",
+      });
+
+      const scheduleResult = await applySchedule({
+        recipeId: String(createResult.recipeId),
+        cron,
+        scheduleText,
+        timezone,
+        params,
+        targetStatus,
+      });
+
+      return {
+        recipeId: createResult.recipeId,
+        ...scheduleResult,
+      };
+    },
   });
 
   const RECIPE_LIST = tool({
-    description: "List all scheduled recipes for this user. Shows active and paused recipes.",
-    parameters: listSchema,
-    // @ts-expect-error - Vercel AI SDK tool() overload resolution issue
+    description: "List all saved recipes for this user, including draft, active, and paused recipes.",
+    parameters: z.object({
+      status: z.enum(["draft", "active", "paused"]).optional(),
+    }),
+    // @ts-expect-error - AI SDK tool typing issue
     execute: async ({ status }) => {
       if (!convex) return { success: false, error: "Convex not configured" };
 
@@ -207,18 +398,18 @@ export function getRecipeTools(userId: string) {
         return {
           success: true,
           count: recipes.length,
-          recipes: recipes.map((r: any) => ({
+          recipes: recipes.map((r) => ({
             id: r._id,
             title: r.title,
-            instruction: r.instruction,
+            description: r.description,
             mode: r.mode,
-            schedule: r.cronHuman,
             status: r.status,
-            nextRun: r.nextRunAt,
-            lastRun: r.lastRunAt,
-            integrations: r.integrationSlugs,
+            cron: r.cron,
+            cronHuman: r.cronHuman,
+            nextRunAt: r.nextRunAt,
+            lastRunAt: r.lastRunAt,
+            integrationSlugs: r.integrationSlugs,
             triggerSlug: r.triggerSlug,
-            triggerId: r.triggerId,
           })),
         };
       } catch (error) {
@@ -230,23 +421,25 @@ export function getRecipeTools(userId: string) {
     },
   });
 
-  const pauseSchema = z.object({
-    recipeId: z.string().describe("The recipe ID to pause/resume"),
-    status: z.enum(["active", "paused"]).describe("Set to 'paused' to pause, 'active' to resume"),
-  });
-
   const RECIPE_PAUSE = tool({
-    description: "Pause or resume a recipe. Paused recipes will not run on schedule.",
-    parameters: pauseSchema,
-    // @ts-expect-error - Vercel AI SDK tool() overload resolution issue
+    description: "Pause or resume a recipe.",
+    parameters: z.object({
+      recipeId: z.string(),
+      status: z.enum(["active", "paused"]),
+    }),
+    // @ts-expect-error - AI SDK tool typing issue
     execute: async ({ recipeId, status }) => {
       if (!convex) return { success: false, error: "Convex not configured" };
 
       try {
         const recipes = await convex.query(api.recipes.list, { userId });
-        const recipe = recipes.find((item: any) => item._id === recipeId);
+        const recipe = recipes.find((item) => String(item._id) === recipeId);
 
-        if (recipe?.mode === "trigger" && recipe.triggerId) {
+        if (!recipe) {
+          return { success: false, error: "Recipe not found" };
+        }
+
+        if (recipe.mode === "trigger" && recipe.triggerId) {
           if (status === "paused") {
             await composio.triggers.disable(recipe.triggerId);
           } else {
@@ -254,7 +447,11 @@ export function getRecipeTools(userId: string) {
           }
         }
 
-        await convex.mutation(api.recipes.setStatus, { recipeId, status });
+        await convex.mutation(api.recipes.setStatus, {
+          recipeId: recipeId as never,
+          status,
+        });
+
         return {
           success: true,
           message: `Recipe ${status === "paused" ? "paused" : "resumed"}.`,
@@ -268,26 +465,24 @@ export function getRecipeTools(userId: string) {
     },
   });
 
-  const deleteSchema = z.object({
-    recipeId: z.string().describe("The recipe ID to delete"),
-  });
-
   const RECIPE_DELETE = tool({
-    description: "Permanently delete a recipe.",
-    parameters: deleteSchema,
-    // @ts-expect-error - Vercel AI SDK tool() overload resolution issue
+    description: "Delete a saved recipe.",
+    parameters: z.object({
+      recipeId: z.string(),
+    }),
+    // @ts-expect-error - AI SDK tool typing issue
     execute: async ({ recipeId }) => {
       if (!convex) return { success: false, error: "Convex not configured" };
 
       try {
         const recipes = await convex.query(api.recipes.list, { userId });
-        const recipe = recipes.find((item: any) => item._id === recipeId);
+        const recipe = recipes.find((item) => String(item._id) === recipeId);
 
         if (recipe?.mode === "trigger" && recipe.triggerId) {
           await composio.triggers.delete(recipe.triggerId);
         }
 
-        await convex.mutation(api.recipes.remove, { recipeId });
+        await convex.mutation(api.recipes.remove, { recipeId: recipeId as never });
         return { success: true, message: "Recipe deleted." };
       } catch (error) {
         return {
@@ -300,6 +495,9 @@ export function getRecipeTools(userId: string) {
 
   return {
     RECIPE_CREATE,
+    RECIPE_CREATE_UPDATE,
+    RECIPE_MANAGE_SCHEDULE,
+    RECIPE_EXECUTE,
     RECIPE_CREATE_TRIGGER,
     RECIPE_LIST,
     RECIPE_PAUSE,
