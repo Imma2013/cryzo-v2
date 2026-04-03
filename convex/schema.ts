@@ -48,10 +48,14 @@ export default defineSchema({
     userId: v.string(),
     title: v.string(),
     instruction: v.string(),
-    cron: v.string(),
-    cronHuman: v.string(),
+    mode: v.union(v.literal("schedule"), v.literal("trigger")),
+    cron: v.optional(v.string()),
+    cronHuman: v.optional(v.string()),
     timezone: v.string(),
     integrationSlugs: v.array(v.string()),
+    triggerSlug: v.optional(v.string()),
+    triggerId: v.optional(v.string()),
+    triggerConfig: v.optional(v.any()),
     status: v.union(v.literal("active"), v.literal("paused")),
     nextRunAt: v.optional(v.string()),
     lastRunAt: v.optional(v.string()),
@@ -60,5 +64,19 @@ export default defineSchema({
     updatedAt: v.string(),
   })
     .index("by_user", ["userId"])
-    .index("by_status_next_run", ["status", "nextRunAt"]),
+    .index("by_status_next_run", ["status", "nextRunAt"])
+    .index("by_trigger", ["triggerId"])
+    .index("by_mode_status", ["mode", "status"]),
+  recipeEvents: defineTable({
+    recipeId: v.id("recipes"),
+    userId: v.string(),
+    source: v.union(v.literal("schedule"), v.literal("trigger")),
+    triggerId: v.optional(v.string()),
+    triggerSlug: v.optional(v.string()),
+    payload: v.any(),
+    result: v.optional(v.string()),
+    createdAt: v.string(),
+  })
+    .index("by_recipe", ["recipeId", "createdAt"])
+    .index("by_user", ["userId", "createdAt"]),
 });

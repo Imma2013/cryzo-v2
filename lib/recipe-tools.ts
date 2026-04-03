@@ -1,6 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { ConvexHttpClient } from "convex/browser";
+import { Composio } from "@composio/core";
+import { VercelProvider } from "@composio/vercel";
 import { api } from "../convex/_generated/api";
 import { deriveCronFromText, nextCronTickFromExpression, validateCron } from "./cron";
 
@@ -26,6 +28,7 @@ function humanizeCron(cron: string): string {
 
 export function getRecipeTools(userId: string) {
   const convex = getConvex();
+  const composio = new Composio({ provider: new VercelProvider() });
 
   const createSchema = z.object({
     title: z.string().describe("Short title for this recipe, e.g., 'Daily Gmail digest'"),
@@ -90,6 +93,7 @@ export function getRecipeTools(userId: string) {
           userId,
           title,
           instruction,
+          mode: "schedule",
           cron: resolvedCron,
           cronHuman: humanizeCron(resolvedCron),
           timezone,
@@ -103,6 +107,80 @@ export function getRecipeTools(userId: string) {
           message: `Recipe "${title}" created. First run: ${nextRun.toLocaleString('en-US', { timeZone: timezone })} (${timezone}).`,
           cron: resolvedCron,
           nextRunAt: nextRun.toISOString(),
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  });
+
+  const triggerSchema = z.object({
+    title: z.string().describe("Short title for this trigger recipe."),
+    instruction: z.string().describe(
+      "The instruction Cryzo should execute when this trigger fires."
+    ),
+    triggerSlug: z.string().describe(
+      "The Composio trigger slug to subscribe to, e.g. GMAIL_NEW_GMAIL_MESSAGE."
+    ),
+    triggerConfig: z.record(z.string(), z.any()).optional().default({}).describe(
+      "Trigger configuration required by the selected trigger slug."
+    ),
+    timezone: z.string().default("UTC").describe("User timezone for display/reference."),
+    integrationSlugs: z.array(z.string()).default([]).describe(
+      "List of integration slugs used by this trigger recipe."
+    ),
+  });
+
+  const RECIPE_CREATE_TRIGGER = tool({
+    description:
+      "Create an event-driven recipe backed by a real Composio trigger. " +
+      "Use this for requests like 'when I receive a Gmail, summarize it' or 'when a GitHub PR opens, post to Slack'.",
+    parameters: triggerSchema,
+    // @ts-expect-error - Vercel AI SDK tool() overload resolution issue
+    execute: async ({
+      title,
+      instruction,
+      triggerSlug,
+      triggerConfig,
+      timezone,
+      integrationSlugs,
+    }: z.infer<typeof triggerSchema>) => {
+      if (!convex) return { success: false, error: "Convex not configured" };
+
+      try {
+        await composio.triggers.getType(triggerSlug);
+      } catch (error) {
+        return {
+          success: false,
+          error: `Unknown trigger slug: ${triggerSlug}.`,
+        };
+      }
+
+      try {
+        const trigger = await composio.triggers.create(userId, triggerSlug, {
+          triggerConfig,
+        });
+
+        const result = await convex.mutation(api.recipes.create, {
+          userId,
+          title,
+          instruction,
+          mode: "trigger",
+          timezone,
+          integrationSlugs,
+          triggerSlug,
+          triggerId: trigger.triggerId,
+          triggerConfig,
+        });
+
+        return {
+          success: true,
+          recipeId: result.recipeId,
+          triggerId: trigger.triggerId,
+          message: `Trigger recipe "${title}" created for ${triggerSlug}.`,
         };
       } catch (error) {
         return {
@@ -133,11 +211,14 @@ export function getRecipeTools(userId: string) {
             id: r._id,
             title: r.title,
             instruction: r.instruction,
+            mode: r.mode,
             schedule: r.cronHuman,
             status: r.status,
             nextRun: r.nextRunAt,
             lastRun: r.lastRunAt,
             integrations: r.integrationSlugs,
+            triggerSlug: r.triggerSlug,
+            triggerId: r.triggerId,
           })),
         };
       } catch (error) {
@@ -162,6 +243,17 @@ export function getRecipeTools(userId: string) {
       if (!convex) return { success: false, error: "Convex not configured" };
 
       try {
+        const recipes = await convex.query(api.recipes.list, { userId });
+        const recipe = recipes.find((item: any) => item._id === recipeId);
+
+        if (recipe?.mode === "trigger" && recipe.triggerId) {
+          if (status === "paused") {
+            await composio.triggers.disable(recipe.triggerId);
+          } else {
+            await composio.triggers.enable(recipe.triggerId);
+          }
+        }
+
         await convex.mutation(api.recipes.setStatus, { recipeId, status });
         return {
           success: true,
@@ -188,6 +280,13 @@ export function getRecipeTools(userId: string) {
       if (!convex) return { success: false, error: "Convex not configured" };
 
       try {
+        const recipes = await convex.query(api.recipes.list, { userId });
+        const recipe = recipes.find((item: any) => item._id === recipeId);
+
+        if (recipe?.mode === "trigger" && recipe.triggerId) {
+          await composio.triggers.delete(recipe.triggerId);
+        }
+
         await convex.mutation(api.recipes.remove, { recipeId });
         return { success: true, message: "Recipe deleted." };
       } catch (error) {
@@ -201,6 +300,7 @@ export function getRecipeTools(userId: string) {
 
   return {
     RECIPE_CREATE,
+    RECIPE_CREATE_TRIGGER,
     RECIPE_LIST,
     RECIPE_PAUSE,
     RECIPE_DELETE,

@@ -3,21 +3,8 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
-import { streamText } from "ai";
-import { createHash } from "crypto";
-import { getAiModel } from "../../../lib/ai-model";
 import { nextCronTickFromExpression } from "../../../lib/cron";
-
-function describeSecret(secret: string | undefined) {
-  const normalized = secret?.trim() ?? "";
-  return {
-    present: normalized.length > 0,
-    length: normalized.length,
-    sha256: normalized
-      ? createHash("sha256").update(normalized).digest("hex").slice(0, 12)
-      : null,
-  };
-}
+import { executeRecipeRun } from "../../../lib/recipe-runner";
 
 export async function GET(req: Request) {
   const cronSecret =
@@ -25,19 +12,6 @@ export async function GET(req: Request) {
   const authHeader = req.headers.get("authorization")?.trim() ?? "";
 
   if (authHeader !== `Bearer ${cronSecret}`) {
-    console.error("Cron auth mismatch", {
-      provided: {
-        present: authHeader.length > 0,
-        length: authHeader.length,
-        sha256: authHeader
-          ? createHash("sha256").update(authHeader).digest("hex").slice(0, 12)
-          : null,
-      },
-      expected: {
-        bearerLength: `Bearer ${cronSecret}`.length,
-        ...describeSecret(process.env.CRON_SECRET),
-      },
-    });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -61,29 +35,15 @@ export async function GET(req: Request) {
 
     for (const recipe of dueRecipes) {
       try {
-        const session = await composio.create(recipe.userId);
-        const composioTools = await session.tools();
-
-        const result = streamText({
-          model: getAiModel({
-            prompt: recipe.instruction,
-            preferLarge: true,
-          }),
-          system: `You are Cryzo, an AI agent executing a scheduled recipe. Today is ${new Date().toLocaleDateString()}.`,
-          prompt: recipe.instruction,
-          tools: composioTools,
-        });
-
-        let finalText = "";
-        for await (const chunk of result.textStream) {
-          finalText += chunk;
-        }
-
-        const nextRun = nextCronTickFromExpression(recipe.cron, new Date());
-        await convex.mutation(api.recipes.markRan, {
-          recipeId: recipe._id,
-          nextRunAt: nextRun ? nextRun.toISOString() : now,
-          result: finalText.slice(0, 500),
+        const nextRun = recipe.cron
+          ? nextCronTickFromExpression(recipe.cron, new Date())
+          : null;
+        const finalText = await executeRecipeRun({
+          convex,
+          composio,
+          recipe,
+          source: "schedule",
+          nextRunAt: nextRun?.toISOString(),
         });
 
         results.push({
