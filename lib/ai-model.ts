@@ -1,7 +1,6 @@
 import { google } from "@ai-sdk/google";
 
-const SMALL_MODEL = process.env.AI_SMALL_MODEL || "gemini-3-flash-preview";
-const LARGE_MODEL = process.env.AI_LARGE_MODEL || "gemini-3.1-pro-preview";
+const DEFAULT_MODEL = process.env.AI_SMALL_MODEL || "gemini-3-flash-preview";
 
 type MessageLike = {
   role?: string;
@@ -39,7 +38,7 @@ function collectText(input: ModelSelectionInput) {
   return [input.system, input.prompt, messageText].filter(Boolean).join("\n");
 }
 
-function shouldUseLargeModel(input?: ModelSelectionInput) {
+function prefersLargeModel(input?: ModelSelectionInput) {
   if (!input) {
     return false;
   }
@@ -78,10 +77,12 @@ function shouldUseLargeModel(input?: ModelSelectionInput) {
     || /summarize[\s\S]*\b(and|then)\b/i.test(latestText);
 }
 
-export function getAiModel(input?: ModelSelectionInput) {
-  return google(shouldUseLargeModel(input) ? LARGE_MODEL : SMALL_MODEL);
+export function getAiModel(_input?: ModelSelectionInput) {
+  return google(DEFAULT_MODEL);
 }
 
 export function getAiModelName(input?: ModelSelectionInput) {
-  return shouldUseLargeModel(input) ? LARGE_MODEL : SMALL_MODEL;
+  return prefersLargeModel(input)
+    ? `${DEFAULT_MODEL} (pro-path-disabled)`
+    : DEFAULT_MODEL;
 }
