@@ -102,7 +102,11 @@ Time range: last ${days} days.
 Return the JSON array now.`;
 
     const result = await generateText({
-      model: getAiModel(),
+      model: getAiModel({
+        prompt: userPrompt,
+        system: systemPrompt,
+        preferLarge: true,
+      }),
       system: systemPrompt,
       prompt: userPrompt,
       tools,

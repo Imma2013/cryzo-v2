@@ -78,7 +78,10 @@ export async function POST(req: Request) {
   const allTools = { ...composioTools, ...recipeTools };
 
   const result = streamText({
-    model: getAiModel(),
+    model: getAiModel({
+      messages,
+      system: `You are Cryzo, an intelligent AI agent. Help the user accomplish tasks using their connected apps. Today's date is ${new Date().toLocaleDateString()}. You can create scheduled recurring recipes using RECIPE_CREATE when the user wants something automated on a schedule (e.g., "send me unread emails every morning").`,
+    }),
     system: `You are Cryzo, an intelligent AI agent. Help the user accomplish tasks using their connected apps. Today's date is ${new Date().toLocaleDateString()}. You can create scheduled recurring recipes using RECIPE_CREATE when the user wants something automated on a schedule (e.g., "send me unread emails every morning").`,
     messages: await convertToModelMessages(messages),
     tools: allTools,
@@ -108,7 +111,10 @@ export async function POST(req: Request) {
 
         await convex.mutation(convexApi.billing.recordUsage, {
           userId,
-          model: getAiModelName(),
+          model: getAiModelName({
+            messages,
+            system: `You are Cryzo, an intelligent AI agent. Help the user accomplish tasks using their connected apps. Today's date is ${new Date().toLocaleDateString()}. You can create scheduled recurring recipes using RECIPE_CREATE when the user wants something automated on a schedule (e.g., "send me unread emails every morning").`,
+          }),
           inputTokens,
           outputTokens,
           totalTokens,

@@ -65,7 +65,10 @@ export async function GET(req: Request) {
         const composioTools = await session.tools();
 
         const result = streamText({
-          model: getAiModel(),
+          model: getAiModel({
+            prompt: recipe.instruction,
+            preferLarge: true,
+          }),
           system: `You are Cryzo, an AI agent executing a scheduled recipe. Today is ${new Date().toLocaleDateString()}.`,
           prompt: recipe.instruction,
           tools: composioTools,
